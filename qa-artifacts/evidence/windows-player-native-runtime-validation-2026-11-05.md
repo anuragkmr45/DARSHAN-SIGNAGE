@@ -1,6 +1,6 @@
 # Windows Player Native Runtime Validation — 2026-11-05
 
-Status: **IN PROGRESS — repaired candidate installed; pairing, local-Docker CMS, default/offline, single-instance and installed active-video restart/PoP gates pass; installed PDF restart and final regression remain**
+Status: **IN PROGRESS — pairing, local-Docker CMS, default/offline, single-instance, active-video restart/PoP, selected-page PDF restart/rendering/delivery/PoP/snapshot, automatic-window recovery, installed-process restart and revoke/re-pair gates pass; remaining work is authorized sign-out/reboot/autostart completion and final evidence/commit closeout**
 
 This record covers the isolated Windows QA deployment only. It is not production approval.
 
@@ -55,13 +55,13 @@ The exact QA CA was later imported into `Current User\Root` after explicit user 
 | build | native Node 20 build completed after all changes | PASS |
 | npm test scripts, initial baseline | Unix single-quoted globs were passed literally on Windows | FAIL |
 | npm test scripts, remediated tree | cross-platform double-quoted globs discover the intended suites | PASS |
-| final native unit suite, normal Windows host access | 537 passed / 9 pending / 6 failed; five failures stop at Windows symlink-creation EPERM before exercising the assertions and one requires an `openssl` executable that is not installed | DEGRADED BUT ACCEPTABLE |
+| final native unit suite, normal Windows host access | post-fix current-source sweep: 552 passed / 9 pending / 6 failed; every failure is an established host prerequisite (five Windows symlink-creation EPERM cases and missing `openssl`). The recovery-reason assertion now passes after immediate confirmed-recovery reconciliation. One scheduled-screenshot test exceeded its five-second limit during an earlier loaded file run and passed immediately in isolation; it passed in the final full sweep. | DEGRADED BUT ACCEPTABLE |
 | focused native symlink suite, Administrator | first run reached all five assertions: 3 passed and 2 failed only because POSIX mode-bit expectations are not meaningful on Windows; platform-correct assertions then passed 5/5, exit 0; no Windows security setting was changed. Repro script SHA-256 `089500c3e2fafde1b136b63e9c871e7a48fcf2f95209eeb3fc90f2b2edef09b0`; result log SHA-256 `f582f3d6f8670873243c7374a2c4692c3b7a8a2c71dd93f071f724325555427f`; exit record contains `0` and has SHA-256 `5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9` | PASS |
 | former suite-order failure | in-place recovery passed in isolation and in the final full suite after replacing a fixed 20 ms sleep with a bounded wait for the submitted recovery and `PAIRED_RUNTIME` state | PASS |
 | Docker symlink-capable supplement | official Node 20.20.2 container, frozen lock install, five focused symlink-hardening cases passed; supplemental only, not native-Windows approval | PASS (SUPPLEMENTAL) |
 | final native integration suite | 6 passed | PASS |
 | final native fault-injection suite | 22 passed | PASS |
-| final native performance suite | 8 passed on the 2026-11-06 rerun; idle CPU P95 18%, memory P95 32.93 MB with no growth, startup 111 ms, timeline jitter P95 0 ms and transition jitter 27 ms | PASS |
+| final native performance suite | 8 passed on the post-window-recovery 2026-11-06 rerun; idle CPU P95 19%, memory P95 33.00 MB with no growth, startup 110 ms, timeline jitter P95 1 ms and transition jitter 20 ms | PASS |
 | renderer browser regression, initial Windows run | long critical emergency copy overflowed its portrait text box; Edge profile cleanup hit a transient lockfile | FAIL (P1 + TEST HARNESS) |
 | final renderer browser regression, remediated Windows run | 1 passed in installed Microsoft Edge; portrait emergency copy fitted and isolated Edge profile cleaned successfully | PASS |
 | focused config suites after P1 fix | 42 passed | PASS |
@@ -71,13 +71,31 @@ The exact QA CA was later imported into `Current User\Root` after explicit user 
 | superseded rebuilt package | 105,169,750 bytes, SHA-256 `1ea2737421fee04b6e69898f9a77071e625e047cb58be732c7758237dd918359`; not installed and no longer matches the final source tree | NOT A CANDIDATE |
 | superseded post-test NSIS package | 105,359,235 bytes, SHA-256 `061041434a208c20a6ad95310e9817f68e8ffb19df376b637cb321715b20f543`; not installed after the emergency-fit source change | NOT A CANDIDATE |
 | superseded emergency-fit NSIS package | 105,359,501 bytes, SHA-256 `0725390b555c01054191101790544df9fc87ef25633b3053e1103d77af25cc20`; not installed after the final TLS resource-safety edit | NOT A CANDIDATE |
-| current rebuilt NSIS package | 105,360,676 bytes, SHA-256 `2454af0bd0cd8fa4f00062e4c85d327a085cf763db25413f883e49045c079cd6` | PASS |
-| current unpacked executable | 188,802,048 bytes, SHA-256 `475e927d57d2d37b05e6b7c5ec26dd9e95afa61d9dae68356cef8bad0dafeeb2` | PASS |
-| current packaged `app.asar` | 83,866,137 bytes, SHA-256 `9fa0758bab3dad7b771a989a4594a950c3158018918d48cf8221bbf8d58e1f65`; installed preload, player bundle and renderer playback artifacts byte-match the current `dist` output | PASS |
+| installed repaired NSIS package | 105,360,676 bytes, SHA-256 `2454af0bd0cd8fa4f00062e4c85d327a085cf763db25413f883e49045c079cd6` | PASS |
+| installed repaired unpacked executable | 188,802,048 bytes, SHA-256 `475e927d57d2d37b05e6b7c5ec26dd9e95afa61d9dae68356cef8bad0dafeeb2` | PASS |
+| installed repaired packaged `app.asar` | 83,866,137 bytes, SHA-256 `9fa0758bab3dad7b771a989a4594a950c3158018918d48cf8221bbf8d58e1f65`; installed preload, player bundle and renderer playback artifacts byte-matched the pre-PDF-screenshot-remediation `dist` output | PASS |
+| superseded blank-PDF-only remediation NSIS | 105,360,784 bytes, SHA-256 `b779482ea7ba60044980942bb2844850cd7384c441e93f62502e90dbe2607175`; built 2026-11-06 22:22:10 +05:30; unsigned, not installed, and superseded after the schedule-close/window-recovery P1 was confirmed | NOT A CANDIDATE |
+| superseded combined PDF/window-recovery NSIS | 105,359,807 bytes, SHA-256 `1be3a3fd05cb697f66df0168596189b71e53099b90a4af3c84376c3eacfc23a6`; built 2026-11-06 23:10:25 +05:30; unsigned, not installed, and superseded after PoP closeout was proved incomplete | NOT A CANDIDATE |
+| installed final PDF/window/PoP-closeout NSIS | 105,359,989 bytes, SHA-256 `d51954068efbb223691f3620bf8e02db3e9cf965f2e3a5fad943f0e8c64d630a`; built 2026-11-06 23:21:52 +05:30; explicitly approved and installed 2026-11-06; unsigned QA build | PASS |
+| installed final executable | 188,802,048 bytes, SHA-256 `47b9e76f125354393250b9fd5183c98345ce1b6e116b2b8f32c12852fb1b8f34`; unsigned | PASS |
+| installed final packaged `app.asar` | SHA-256 `17a963d43ec7ae420089a234b459568da6210c62e658d99c7d7b02d3b07f5de8`; packaged application, playback engine and PDF renderer byte-match the final local production `dist` output | PASS |
+| superseded first composed-screenshot/active-slot-retry NSIS | 105,359,653 bytes, SHA-256 `1cd4b417340d2f02035d621a81959e179a85b5d86d6d7e8f5066949b0ad2bc89`; unsigned and never installed. A native Windows smoke test proved Electron did not enumerate the calling process's window source, so the candidate was superseded before approval. | NOT A CANDIDATE |
+| installed display-compositor/active-slot-retry NSIS | 105,360,162 bytes, SHA-256 `77718f88d475afe30f676eea146ab09ecb72f6b8f088a535c471f2ce7f172db0`; unsigned; explicitly approved and installed | SNAPSHOT SUPERSEDED |
+| installed focus/elevation capture NSIS | 105,360,314 bytes, SHA-256 `0c161b9c128f3c17e21cb90ada22daf86a637693dc642b95ac6c293ac718e28a`; unsigned; explicitly approved and installed 2026-11-07 | PDF SNAPSHOT FAIL |
+| superseded PDF image-layer capture NSIS | 105,360,653 bytes, SHA-256 `8fad824ebd0a20a9a2f0ce0815dd9c19b7d41489b141b385998f19a0efa28391`; unsigned; not installed and superseded after the final unit sweep exposed stale recovery-reason reconciliation | NOT A CANDIDATE |
+| installed PDF image-layer/recovery-reconciliation NSIS | 105,360,901 bytes, SHA-256 `af0a1fd625a6c3e7a7454cc6765017f986e4e7bbbd6bbcc3b8dbc68826ef7845`; unsigned; explicitly approved and installed 2026-11-07; post-fix unit 552 pass / 9 pending / 6 host prerequisites, integration 6/6, performance 8/8, fault 22/22, lint zero errors, production build and covered-window capture smoke pass | PASS |
+| installed packaged provenance | unpacked executable 188,802,048 bytes / SHA-256 `28f9dcfeb3a37ba1ebe49971a8b6ffaa88c840c9dbafa7a33790cb7128e008de`; `app.asar` 83,878,271 bytes / SHA-256 `cfdf87f0b9522107e85aff27bc3c26819019077fcedb810c52c55450b6d3b810`. Packaged application, player-flow recovery reconciliation, Windows compositor helper, PDF renderer and final renderer bundle each byte-match the post-fix production `dist` artifact. | PASS (PROVENANCE) |
 | rebuilt signing | unsigned | DEGRADED BUT ACCEPTABLE |
 | changed-text secret/redaction audit | no private-key PEM, JWT-shaped value, assigned password/session/access/refresh token, or full device UUID in the Windows evidence; certificate PEM markers are unchanged test fixtures and absent from the diff | PASS |
 
 The current package completed as a per-user x64 NSIS installer without Linux packaging tools. Electron-builder found no signing identity, so both the executable and installer remain unsigned.
+
+The approved `af0a1fd6…7845` candidate was rehashed immediately before install,
+installed silently with exit code 0, and produced the exact approved
+188,802,048-byte installed executable. It ran as one four-process player tree
+against the existing isolated local-Docker runtime and reused the signed paired
+identity without an OTP. All six `win-qa-20261105-local` services remained
+available and CMS `:18444` returned HTTP 200.
 
 ## Installation and visible player journeys
 
@@ -86,7 +104,7 @@ The current package completed as a per-user x64 NSIS installer without Linux pac
 | Approved initial install | one-click per-user installation completed | PASS |
 | Initial installed executable | `%LOCALAPPDATA%\Programs\darshan-player\DARSHAN-Player.exe`, version 1.0.0, SHA-256 `37c38325d3c3eedaee552fd5bb94fc166d6a91a82e5bf39c1816a3273d5728e2` | PASS |
 | Approved rebuilt install | exact unsigned NSIS SHA-256 `fbaaa365e7acb9aacff2e3cfe6c7eab61919bec6caf79ec6af2f7cee1a01ca0b`, 105,359,603 bytes, installed per-user on 2026-11-06 | PASS |
-| Current installed executable | version 1.0.0, 188,802,048 bytes, SHA-256 `475e927d57d2d37b05e6b7c5ec26dd9e95afa61d9dae68356cef8bad0dafeeb2`, unsigned | PASS |
+| Current installed executable | version 1.0.0, 188,802,048 bytes, SHA-256 `28f9dcfeb3a37ba1ebe49971a8b6ffaa88c840c9dbafa7a33790cb7128e008de`, unsigned; installed from exact approved `af0a1fd6…7845` package | PASS |
 | Start Menu registration | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\DARSHAN-Player.lnk` targets the installed executable | PASS |
 | ProgramData config and CA | destination hashes matched the bootstrap packet; config contained no credential/private-key markers; CA contained one certificate and no private key | PASS |
 | First visible launch | fullscreen forest pairing screen; no window chrome or immediate crash | PASS |
@@ -95,7 +113,10 @@ The current package completed as a per-user x64 NSIS installer without Linux pac
 | Countdown | advanced normally; a strict-TLS read-only status poll confirmed the server-authoritative countdown progressed from generation 55 to expiry without relying on the stale hidden-window accessibility cache | PASS |
 | Second launch | one player window remained | PASS |
 | Rebuilt second launch | one player window remained after launching the installed executable again | PASS |
-| Current repaired-candidate second launch | the current installed 105,360,676-byte candidate was launched again while its paired kiosk process was running; the attempted second main process exited, the original main PID remained, and exactly one main process plus its three Electron children remained | PASS |
+| Earlier repaired-candidate second launch | the then-installed 105,360,676-byte candidate was launched again while its paired kiosk process was running; the attempted second main process exited, the original main PID remained, and exactly one main process plus its three Electron children remained | PASS |
+| Final post-reinstall Start Menu/single-instance launch | the registered Start Menu shortcut resolved to the exact final installed executable. Launching it while the paired kiosk was running preserved the original root PID, one four-process tree and exactly one visible window. | PASS |
+| Final-candidate automatic window recovery | closing the sole default-media kiosk on the installed 105,359,989-byte candidate retained the original main process and one four-process tree, then recreated exactly one visible `ONLINE` / `DEFAULT MEDIA` window in about 1.3 seconds; no new error/fatal or destroyed-object record and no stale backend schedule/slot/open-PoP state | PASS |
+| Final-candidate same-package repair | immediately reverified approved installer hash/size, stopped only the idle default-media player, ran the exact installer silently with exit code 0, and confirmed the installed executable returned to the exact 188,802,048-byte approved hash. Relaunch with the isolated selector reused pairing with no OTP, returned one four-process tree and one visible `ONLINE` / `DEFAULT MEDIA` window, and the backend retained exactly one dedicated ACTIVE screen with fresh heartbeat and zero active schedules/slots | PASS |
 | Start Menu app launch | launched the registered `com.darshan.player` entry while the player was running; the same window ID remained the only DARSHAN window and the pairing surface stayed coherent | PASS |
 | Executable path containing spaces | copied the complete 79-file then-installed program (402,870,170 bytes) to a verified Windows temporary path containing spaces; executable SHA-256 `5e4ff1aacb0821340f88741f4eee64d389779237155661079b825b30674f1fda` and `app.asar` SHA-256 `7ba75fa923655082cd657c002fdbf700e251ecf6118a607fc0a567a3110c1a9f` matched that installed candidate. A process and one visible pairing window ran from that exact spaced path with hostname, countdown and waiting state intact. The temporary process was stopped, the ordinary installed player restored to one coherent pairing window, and the exact 79-file duplicate removed. | PASS |
 | Close/reopen while pending | same redacted Device ID, OTP and countdown resumed | PASS |
@@ -146,13 +167,17 @@ The then-installed executable (SHA-256 `5e4ff1aacb0821340f88741f4eee64d389779237
 
 | Case | Observed behavior | Result |
 | --- | --- | --- |
-| Current-user autostart registration | exactly one `com.darshan.player` Current User Run entry targets the current installed executable; the registration was re-read after the final install and the executable SHA-256 is `475e927d57d2d37b05e6b7c5ec26dd9e95afa61d9dae68356cef8bad0dafeeb2` | PASS |
-| Sign-in/reboot autostart | registration is present, but actual sign-out/sign-in and reboot behavior require immediate user approval | BLOCKED (APPROVAL) |
+| Current-user autostart registration | exactly one `com.darshan.player` Current User Run entry targets the current installed executable; the registration was re-read after the final install and the executable SHA-256 is `28f9dcfeb3a37ba1ebe49971a8b6ffaa88c840c9dbafa7a33790cb7128e008de` | PASS |
+| Local-Docker autostart selector | plain installed/Run launch originally fell back to ProgramData's unavailable remote-QA profile because the local-Docker runtime root and config had only been process-scoped. Two DARSHAN-specific Current User environment values now persist the existing isolated runtime root and canonical `player-runtime/config.json`; both resolved targets exist. The config selector was re-read and corrected after the fresh re-pair so it names the exact config that returned ONLINE. No password, automatic-login, security or unrelated environment value was stored/changed. Actual inheritance remains to be proved by the approved sign-out/reboot journey. | PREPARED / RUNTIME VERIFICATION OPEN |
+| Sign-in/reboot autostart | one sign-out and one reboot are explicitly approved for the end of this run. Registration and local-Docker selectors are prepared; execution is intentionally deferred until the authenticated CMS-dependent final journey completes. | APPROVED / NOT YET RUN |
 | Uninstall registration | exactly one Current User `DARSHAN-Player 1.0.0` registration points to the installed uninstaller with `/currentuser`; the entry declares no Control Panel modify/repair action | PASS (PREFLIGHT) |
 | Installed uninstaller | SHA-256 `b43dc90e9896529de5fd298468a62152e3c26a17ef72eaa22ec36d2536daff28`; unsigned | DEGRADED BUT ACCEPTABLE (QA ONLY) |
 | Pre-uninstall retention baseline | installed program: 79 files / 402,870,298 bytes / no reparse points; per-user runtime: 48 files / 1,765,197 bytes / no reparse points, including generic config, device-state and pending-pairing credential files without reading or hashing their contents; ProgramData: only `config.json` (706 bytes, expected SHA-256 `61bdbbd…e6a8`) and `transport-ca.crt` (1,513 bytes, expected SHA-256 `e98416ad…bc48`) | PASS (BASELINE) |
+| Final-package uninstall | with the player idle on default media and no active slot, the exact hash-recorded uninstaller ran silently with `/currentuser`, exited 0, removed every file from the installed program directory and removed its uninstall registration. The empty install directory remained temporarily. Both Roaming application-data trees, the updater cache, two ProgramData bootstrap files and all 20 isolated runtime files were retained. | PASS |
+| Uninstall autostart cleanup | the `com.darshan.player` Current User Run value remained while the executable was absent. Windows therefore retained a stale login target until reinstall. No data or pairing loss occurred. | P2 DEFERRED |
+| Exact-package reinstall | the installer was rehashed to `d5195406…630a` / 105,359,989 bytes immediately before reinstall, ran silently with exit 0, restored the exact installed executable hash, recreated one uninstall registration and left one Run entry. Relaunch with the isolated selector reused pairing without OTP, returned one visible `ONLINE` / `DEFAULT MEDIA` kiosk, and the backend retained one fresh dedicated ACTIVE screen with zero active slots. | PASS |
 
-No uninstall, repair/reinstall, sign-out or reboot action was taken in this preflight.
+No uninstall, repair/reinstall, sign-out or reboot action was taken in this historical preflight. The exact final package was later exercised as both a same-package silent repair and a complete silent uninstall/reinstall. Both returned the exact executable bytes and reused pairing without OTP; one ONLINE kiosk and exactly one backend screen with fresh heartbeat returned. The uninstaller left a stale Run value only while the executable was absent, classified P2 and automatically repaired by reinstall. Sign-out/reboot remains open.
 
 `doctor` and the collected `displays.json` reported an empty display inventory even though the running packaged UI and machine baseline identify one 1920×1080 display. Source inspection shows the operator-only process reads `DisplayManager` before starting it. This is a non-blocking diagnostics gap, classified P2 and deferred under the goal's P0/P1-only remediation rule. The pre-pairing doctor also reported WebSocket unreachable; HTTPS bootstrap/API readiness remained healthy, and authenticated realtime behavior still requires pairing.
 
@@ -192,7 +217,7 @@ production TLS remain non-blocking follow-ups rather than gates for this run.
 
 1. Native Edge authentication succeeded and the real dashboard/Screens/Pair Device surfaces loaded, but the CMS production inspection lock then redirected the tab to login before submission. The confirmed P1 false-positive fix passes locally and deployment is authorized, but SSH port 22 is refused and no alternate port/key is available. A reachable SSH endpoint and approved authentication method are required before CMS-only deployment and real-browser reverification; the existing lock will not be bypassed.
 2. Expired generation-55 rejection and current generation-56 approval through the real CMS remain pending. Generation change, different code, stable hostname and stable redacted Device ID are verified.
-3. Pairing persistence, CMS telemetry, media, scheduling, delivery, proof-of-play, screenshot, offline recovery, emergency, deletion/repairing, paired-content `clear-cache`/redownload, autostart sign-in/reboot, repair and uninstall remain incomplete.
+3. This historical checkpoint preceded the successful local-Docker pairing, telemetry, media, scheduling, delivery, proof-of-play, screenshot, offline recovery, emergency, paired `clear-cache`/redownload and final same-package repair journeys documented below. Deletion/re-pairing, autostart sign-in/reboot and uninstall/reinstall remain incomplete.
 4. No CMS mutation was submitted and the dashboard remained at zero screens before the lock activated.
 
 The CMS false-lock remediation and its deployment-package provenance are committed separately. This verified player hardening packet is preserved in this scoped commit; integrated QA pairing and post-pairing validation remain pending until the authorized CMS deployment transport is reachable.
@@ -473,7 +498,277 @@ so no duplicate restart interval was present. Local PoP state drained to zero
 buffer items and zero spool files, with zero dropped or compacted events. The
 installed-video restart and closed-interval PoP gate are PASS.
 
-The exact installed active-PDF restart and the final installed regression remain gates.
+The exact installed selected-page PDF journey was then published through the
+native CMS as `WIN-QA-20261105-LOCAL-INSTALLED-FINAL-PDF-01`, targeting only
+the dedicated Windows QA screen for the 21:50–22:50 Asia/Kolkata window. The
+backend snapshot named `WIN-QA-20261105-LOCAL-MULTIPAGE-PDF`, type `document`,
+fit `contain`, page 3, and a 10,000 ms display interval. Independent local
+rendering confirmed that page 3 of the five-page source fixture is intentionally
+blank, so the expected player result is a white 16:9 page rather than visible
+copy.
+
+At 22:03 the exact installed-player process tree was restarted. The first
+manual relaunch omitted the isolated runtime selector and therefore opened the
+preserved remote-QA pairing profile; no pairing or CMS mutation was performed
+from that window. This was a test-harness launch error, not a reproduced player
+defect. The mistaken process tree was closed and the same installed executable
+was relaunched with the preserved local-Docker runtime root and player site
+selector. Exactly one player window returned paired and `ONLINE`, with a fresh
+22:03:22 snapshot, and visibly rendered the expected blank page 3.
+
+CMS then reported the dedicated screen ONLINE with fresh heartbeat, Auth OK,
+Heartbeat OK, and the PDF as its current media. Delivery was `ACKED_SUCCESS`
+with zero pending, zero leased and zero failed commands. Now Playing identified
+the exact PDF schedule, one active `main` slot, and a post-restart slot start at
+22:03:23. Safe fingerprints: request `d40c688764da`, schedule `ee4fa7f99172`,
+snapshot `2108c242b5e9`. Installed PDF restart rendering, delivery and active-slot
+correlation are PASS.
+
+Before the natural boundary, the renderer window closed at 22:34:24 while the
+long-lived main process and services remained alive. At 22:50 the timeline
+stopped, but a renderer IPC call threw `Object has been destroyed`; the next
+snapshot poll reproduced the same failure twice. A subsequent exact second
+launch logged the single-instance attempt but did not recreate a visible
+window. Consequently the natural visible fallback and closed-interval PoP gate
+did not pass on this installed candidate. This is the window-recovery P1
+documented below, not a successful PDF closeout.
+
+### P1 — blank PDF screenshot pixels captured as black
+
+While the installed player visibly rendered the intentionally blank white PDF
+page, a fresh CMS `Take Snapshot` command completed successfully at 22:12:31
+but its preview was mostly black with only a white strip and the player status
+overlay. A second successful capture at 22:15:04 reproduced the mismatch while
+the live player remained white. An immediate intervening command was correctly
+rejected as rate limited and is not counted as the reproduction. Playback,
+delivery and the active slot remained correct, so the defect is isolated to
+visual evidence but is classified **P1** because the uploaded evidence
+materially misrepresented displayed content.
+
+Root cause: PDF.js rendered an intentionally blank page into a transparent
+backing canvas. The visible canvas had a white CSS background, but Electron's
+pixel capture observed the transparent backing pixels as black. The renderer
+now fills the backing pixel buffer opaque white under the identity transform
+before restoring the PDF render scale and invoking PDF.js. Focused regression
+coverage asserts the white fill and transform order: 6/6 PDF playback helper
+tests pass; the broader renderer unit suite passes 48/48. Focused lint has zero
+errors (five existing return-type warnings), the production build passes, and
+Windows NSIS packaging passes.
+
+The PDF-only candidate below was built but not installed and was superseded by
+the combined candidate after the later window-recovery P1 was confirmed:
+
+- path: `darshan-player/build/DARSHAN-Player Setup 1.0.0.exe`;
+- size: 105,360,784 bytes;
+- SHA-256: `b779482ea7ba60044980942bb2844850cd7384c441e93f62502e90dbe2607175`;
+- signing: unsigned QA build;
+- status: built and verified, not installed, superseded.
+
+### P1 — destroyed renderer window breaks schedule close and relaunch recovery
+
+The installed window closed at 22:34:24 while its main process stayed alive.
+At the 22:50 schedule boundary, `PlaybackEngine.stop()` sent to the destroyed
+renderer and raised an unhandled `Object has been destroyed` rejection. The
+22:52 snapshot refresh reproduced the same exception in both online and
+offline-fallback handling. At 22:54, launching the exact installed executable
+again reached the existing single-instance process but did not restore any
+window. This is classified **P1** because schedule/fallback playback and the
+visible kiosk were unavailable while telemetry services continued in the
+background.
+
+The playback engine now validates both `BrowserWindow` and `webContents` and
+contains the teardown race around every renderer playback IPC send. The
+single-instance and activation paths now create a window when none survives,
+otherwise restoring/focusing the existing window. A read-only backend
+correlation then confirmed the closed PDF fixture had one schedule row but zero
+PoP rows (zero completed and zero open), while the local PoP spool was empty.
+The close therefore also lost the in-memory interval instead of merely delaying
+its upload.
+
+The final lifecycle fix captures the exact window identity, detaches its
+content owner immediately on close, closes all active slots as incomplete,
+clears stale Now Playing/telemetry, and automatically creates one replacement
+kiosk. Graceful quit is fenced from recovery, and a stale close or crash
+callback cannot clear or destroy a newer window. Focused PDF/content-owner/
+playback/window recovery coverage passes 27/27, including exact-sender detach,
+already-destroyed and between-check/send teardown, and missing/destroyed/
+minimized window recovery. A real source-build second launch kept exactly one
+visible player and logged the `focused` recovery result. Integration passes
+6/6, full lint has zero errors, and production build/package pass. The final
+full unit sweep recorded 543 passing / 9 pending / 7 failing: six are the
+established symlink/OpenSSL host prerequisites, while the existing
+recovery-reason suite-order case passed immediately in isolation and in the
+complete player-flow run (33/33). The previously recorded fault injection
+22/22 and performance 8/8 sweeps remain applicable.
+
+Initial combined candidate (never installed; superseded after PoP closeout was
+proved incomplete):
+
+- path: `darshan-player/build/DARSHAN-Player Setup 1.0.0.exe`;
+- size: 105,359,807 bytes;
+- SHA-256: `1be3a3fd05cb697f66df0168596189b71e53099b90a4af3c84376c3eacfc23a6`;
+- signing: unsigned QA build;
+- status: built and verified, not installed, superseded.
+
+Final combined remediation candidate, explicitly approved and installed:
+
+- path: `darshan-player/build/DARSHAN-Player Setup 1.0.0.exe`;
+- size: 105,359,989 bytes;
+- SHA-256: `d51954068efbb223691f3620bf8e02db3e9cf965f2e3a5fad943f0e8c64d630a`;
+- signing: unsigned QA build;
+- unpacked executable SHA-256: `47b9e76f125354393250b9fd5183c98345ce1b6e116b2b8f32c12852fb1b8f34`;
+- packaged `app.asar` SHA-256: `17a963d43ec7ae420089a234b459568da6210c62e658d99c7d7b02d3b07f5de8`;
+- provenance: packaged application, playback engine and PDF renderer byte-match
+  the final local production `dist` output;
+- status: installed; installed executable SHA-256
+  `47b9e76f125354393250b9fd5183c98345ce1b6e116b2b8f32c12852fb1b8f34`.
+
+The exact installed package passed the automatic missing-window recovery
+journey at 23:38:44–23:39:01 +05:30. Before injection it had one responding
+four-process Electron tree and exactly one visible kiosk. A native close request
+was accepted for that exact kiosk; the original root process remained alive,
+the process count stayed four, and one replacement window was observable after
+about 1.3 seconds. The recovered installed window visibly reported `ONLINE`,
+`DEFAULT MEDIA`, and the expected assigned fallback artwork. Redacted log
+correlation since injection recorded one `Main window closed`, one new
+`Creating main window`, zero error/fatal records, and zero new `Object has been
+destroyed` records. Read-only backend correlation found exactly one dedicated
+`WIN-QA-20261105-LOCAL-` screen, `ACTIVE`, with a 9.1-second heartbeat age;
+current schedule/media were absent, active slots were zero, and open PoP rows
+were zero. Automatic destroyed-window recovery is therefore **PASS on the exact
+installed candidate** without a duplicate process or stale telemetry.
+
+The signed-in active-PDF continuation then exercised those gates with
+`WIN-QA-20261105-LOCAL-FINAL-PDF-VERIFY-02`, scheduled for 2026-11-07
+00:50–00:57 +05:30 against only the dedicated Windows QA screen. Page 3 of
+`WIN-QA-20261105-LOCAL-MULTIPAGE-PDF` was visibly white on the physical player;
+the CMS reported `ACKED_SUCCESS`, the correct current media and one active
+slot. A native close retained the original four-process tree and automatically
+created one replacement window that still showed the white PDF. At the schedule
+boundary the player returned to DEFAULT MEDIA. The visible frame is retained as
+`runtime-2026-10-16/installed-final-pdf-page3-white-20261107.png`.
+
+Two P1 failures were confirmed on that exact installed candidate. First, a
+successful CMS `Take Snapshot` upload displayed a black preview while the
+physical player was white. Second, read-only backend correlation showed zero
+PoP rows throughout and after the interval despite the active slot and
+successful delivery. The first visible slot report can race ahead of
+playback-engine scene installation; the old handler remembered that rejected
+report permanently. Source now retains a newly reported slot only after
+`recordRenderedLayoutPlayback` accepts it, so the next report retries the start.
+Previously accepted slots remain stable.
+
+The first window-source implementation was rejected before installation: a
+native Electron smoke run showed that Windows did not enumerate the calling
+process's own test BrowserWindow. The corrected display-compositor candidate,
+unsigned SHA-256 `77718f88d475afe30f676eea146ab09ecb72f6b8f088a535c471f2ce7f172db0`
+and 105,360,162 bytes, was explicitly approved and installed on 2026-11-07.
+Its exact installed executable SHA-256 was
+`f0929309605cb45a07d745deac0360f54ba10d2ebe560c3d036cecc4532a5c3d`.
+
+The signed-in CMS then published
+`WIN-QA-20261105-LOCAL-FINAL-PDF-VERIFY-03` for page 3 from 01:43–01:51
++05:30. The installed player reported ONLINE, rendered the expected white page,
+reported one live slot and returned to DEFAULT MEDIA at the natural boundary.
+CMS Proof of Play recorded exactly one new page-3 interval, started 01:43:22,
+ended 01:51:00 and marked Completed. This closes the active-slot/PoP P1 on the
+exact installed package.
+
+The snapshot gate still failed. `Take Snapshot` completed at 01:44:37 and the
+preview was fresh, but it contained the foreground CMS window recursively
+instead of the player. The player's `moveTop()` call alone does not overcome a
+foreground browser on Windows. Source now temporarily sets the player always on
+top, moves it to the top, focuses it, waits 250 ms for the compositor, captures
+and crops the matching display, then restores the previous always-on-top state.
+The strengthened native smoke deliberately covers a non-always-on-top white
+canvas window with a black window before capture; it now returns a non-empty
+480×360 image with a white sampled center.
+
+Focused active-slot/screenshot/playback/window coverage passes 59/59, including
+three compositor-helper cases, and the strengthened native cover smoke passes.
+The preceding complete regression remains 551 passing / 9 pending / 6 host
+prerequisites, integration 6/6, fault injection 22/22, performance 8/8 and lint
+with zero errors. The replacement unsigned installer is
+`darshan-player/build/DARSHAN-Player Setup 1.0.0.exe`, 105,360,314 bytes,
+SHA-256 `0c161b9c128f3c17e21cb90ada22daf86a637693dc642b95ac6c293ac718e28a`.
+Its unpacked executable SHA-256 is
+`50af240f24f59ea0e72afabde9801c7af306735da319579882d18f1bcef69613`
+and its `app.asar` SHA-256 is
+`1f6b593d5985a13870d5ddba8f893c9bd0b413eb902beb962774bed4cfae47fa`.
+It was explicitly approved and installed. The exact installed executable was
+188,802,048 bytes with SHA-256
+`50af240f24f59ea0e72afabde9801c7af306735da319579882d18f1bcef69613`.
+
+The CMS then published `WIN-QA-20261105-LOCAL-FINAL-PDF-VERIFY-04`, page 3 of
+`WIN-QA-20261105-LOCAL-MULTIPAGE-PDF`, to the dedicated screen. Physical
+playback was the expected white page and CMS reported one live slot. Snapshot
+commands at 03:00:01 and 03:02:41 +05:30 both successfully focused and captured
+the player rather than the CMS, but the accelerated PDF canvas pixels were
+black while the ordinary HTML overlay remained visible. This proves the
+focus/elevation correction and isolates the remaining P1 to Windows compositor
+capture of the accelerated canvas.
+
+Source now mirrors each completed PDF canvas into an ordinary decoded PNG image
+layer before presenting it. Focused PDF/capture tests pass 19/19, the production
+build passes, and the covered-window native smoke captures a 480×360 image with
+a white center. The final sweep also exposed a real stale-message race when a
+confirmed recovery response omitted `pairing_code`; source now immediately
+reconciles that authoritative response instead of leaving the older invalid-
+credential reason visible until a later poll. Its exact regression passes.
+
+The resulting unsigned NSIS is 105,360,901 bytes with SHA-256
+`af0a1fd625a6c3e7a7454cc6765017f986e4e7bbbd6bbcc3b8dbc68826ef7845`.
+Its unpacked executable is 188,802,048 bytes, SHA-256
+`28f9dcfeb3a37ba1ebe49971a8b6ffaa88c840c9dbafa7a33790cb7128e008de`,
+and packaged `app.asar` is 83,878,271 bytes, SHA-256
+`cfdf87f0b9522107e85aff27bc3c26819019077fcedb810c52c55450b6d3b810`.
+Post-fix regression records unit 552 pass / 9 pending / 6 host prerequisites,
+integration 6/6, performance 8/8, fault injection 22/22, lint zero errors,
+build pass and covered-window native smoke pass. The user explicitly approved
+the exact hash and size, and it was installed on 2026-11-07.
+
+### Final installed PDF image-layer verification
+
+The signed-in CMS published `WIN-QA-20261105-LOCAL-FINAL-PDF-VERIFY-05` to only
+`WIN-QA-20261105-LOCAL-WINDOWS-PLAYER`, using page 3 of
+`WIN-QA-20261105-LOCAL-MULTIPAGE-PDF`. Publish delivery and command delivery
+both reported `ACKED_SUCCESS`; before activation CMS reported zero current and
+one upcoming item. At 09:00:00 +05:30 the installed player visibly replaced
+default content with the expected white page 3, stayed `ONLINE`, and omitted
+the `DEFAULT MEDIA` badge. CMS reported exactly one live `main` slot and the
+matching document media.
+
+The CMS snapshot command completed at 09:01:04. Its fresh preview showed the
+white PDF page, player status overlay and expected black pillarbox margins; it
+did not show an all-black PDF region and did not recursively capture the CMS.
+This closes the accelerated-PDF snapshot P1 on the exact installed package.
+
+The dedicated schedule was taken down at 09:05:12. The player immediately
+returned to the `ONLINE` / `DEFAULT MEDIA` `No content assigned` state. Proof
+of Play then recorded one page-3 row for the dedicated screen, started
+09:00:00, ended 09:05:12, outcome `Completed`. A controlled exact-process
+restart with the isolated runtime/config selectors produced one four-process
+tree, reused pairing without an OTP, and restored the same online default state;
+the new player overlay reported a 09:08:53 snapshot heartbeat.
+
+### Revocation, deletion guard and fresh re-pair
+
+The dedicated screen could not be deleted through the supported CMS contract
+because the taken-down `WIN-QA-20261105-LOCAL-FINAL-PDF-VERIFY-05` schedule is
+retained as audit history. The CMS first reported both a default-media and a
+schedule reference; the default assignment was cleared through Site Settings,
+leaving the single audit-preserved schedule reference. No direct database
+mutation or authentication-token extraction was used to bypass that guard.
+
+The supported `Revoke pairing` action then changed the installed player to
+`Recovery Required` / `Device credentials revoked`. The packaged
+`reset-pairing` operator command exited 0 against the isolated QA runtime,
+cleared only identity-bound state and preserved logs, proof-of-play and offline
+queues. The relaunched installed player issued a fresh pairing request. CMS
+approval created a new online record with the same dedicated QA name, and the
+player returned `ONLINE` / `No content assigned` at 09:28:09 without retaining
+the revoked certificate. The old revoked record remains visible only because
+its schedule audit reference makes deletion intentionally unavailable.
 
 ### Targeted emergency and recovery
 
@@ -495,15 +790,17 @@ local Docker config while the visible player remained available.
 | --- | --- | --- |
 | `doctor` | exit 0; runtime `qa`; platform `win32`; config/cache present; paired identity true; local API reachable | PASS |
 | `pairing-status` | exit 0; paired locally; device ID present; last validated ID matched; certificate and private-key files present; local deployment identity present | PASS |
-| direct CLI output secret scan | zero private-key markers, JWT shapes, credentialed URLs or full UUIDs in the captured doctor/pairing-status output | PASS |
+| earlier direct CLI output secret scan | zero private-key markers, JWT shapes, credentialed URLs or full UUIDs in the captured doctor/pairing-status output | PASS |
 | `collect-logs` | exit 0; eight files, 565,868 bytes, zero reparse points and no unsafe filenames | PASS |
 | required bundle secret scan | zero private-key or certificate PEM markers, JWTs, credentialed URLs, bearer values, cookie assignments or password/token assignments | PASS |
 | operational identifier review | the sanitized player log contained 126 UUID-shaped values, including 40 occurrences of the current device ID; safe field labels included device, item, media, publish, schedule and snapshot identifiers | DEGRADED BUT ACCEPTABLE / P2 |
 | paired `clear-cache` removal | pre-state 4 files / 308,607 bytes; command exit 0; media cache became 0 files / 0 bytes while device identity, all three certificate hashes, logs, request queue, proof-of-play spool and screenshots were preserved; command output contained zero private-key markers, JWT shapes or full UUIDs | PASS |
 | online redownload after restart | QA kiosk policy reproducibly blocked Alt+F4 as intended; the five verified exact-path processes were terminated, then the installed executable was relaunched with the same isolated runtime. It reused pairing without an OTP, reported ONLINE / DEFAULT MEDIA, and restored 4 files / 308,607 bytes. A post-restart `pairing-status` exited 0 with paired-local true, valid current identity, matching last-validated device, certificate/private-key files present and zero private-key/JWT shapes in captured output. | PASS |
+| final-candidate `doctor` / `pairing-status` rerun | both exited 0 after final uninstall/reinstall; `doctor` reported win32 and paired state. Neither output contained a private-key marker, JWT shape or credentialed URL. `pairing-status` contained one full operational UUID, so raw output remains internal-only. | PASS / P2 REDACTION DEBT |
+| final-candidate `collect-logs` rerun | exit 0; eight files / 1,828,299 bytes, zero reparse points and zero unsafe filenames. Content had zero private-key markers, JWT shapes or credentialed URLs, but 1,382 UUID-shaped operational values accumulated in the sanitized log history. The exact verified temporary bundle was deleted immediately after review. | PASS / P2 REDACTION DEBT |
 
 The repository evidence policy requires full device identifiers to be redacted
-before sharing. The bundle was therefore treated as internal-only and deleted
+before sharing. Both reviewed bundles were therefore treated as internal-only and deleted
 from the Windows temporary directory immediately after review. It is fully
 regenerable with `collect-logs`. No bundle content or raw identifier was added
 to evidence or chat. This is deferred P2 evidence-redaction debt rather than a
@@ -512,8 +809,8 @@ the documented manual review gate worked as intended.
 
 ### Remaining approval and coverage gates
 
-1. The exact unsigned installer SHA-256 `2454af0bd0cd8fa4f00062e4c85d327a085cf763db25413f883e49045c079cd6`, 105,360,676 bytes, was explicitly approved and installed. The exact installed active-video restart and closed-interval PoP check pass; the installed active-PDF restart and final installed regression remain open.
+1. The final image-layer/recovery-reconciliation package is installed and verified: unsigned SHA-256 `af0a1fd625a6c3e7a7454cc6765017f986e4e7bbbd6bbcc3b8dbc68826ef7845`, 105,360,901 bytes. The exact page-3 journey passed visible playback, delivery, one-slot telemetry, non-black CMS snapshot, default handoff, Completed PoP and a paired installed-process restart. No further installer approval is pending unless source changes create a different package hash or size.
 2. Direct user login to the local CMS completed. The dedicated installed-video request completed authenticated create, approve and publish to only the QA screen; delivery, Now Playing and screenshot evidence pass. The remaining tab-by-tab and two-session convergence checks stay open.
-3. Missing/corrupt image/video runtime fallback, physical audible-output confirmation, missing emergency media, group/site default priority, deletion/re-pairing and the final integrated regression remain open. Large-image, corrupt/encrypted-PDF ingest, one-page/selected-page PDF, mute/loop-off and loop-on semantics now have evidence above.
-4. Sign-out, reboot, repair/reinstall and uninstall/reinstall remain approval-gated. True upgrade remains blocked unless an older approved package is supplied.
+3. Missing/corrupt image/video runtime fallback, physical audible-output confirmation, missing emergency media, group/site default priority and the final integrated regression remain open. Revocation and fresh re-pair now pass; deletion was correctly refused while an audit-preserved schedule reference exists. Large-image, corrupt/encrypted-PDF ingest, one-page/selected-page PDF, mute/loop-off and loop-on semantics now have evidence above.
+4. Same-package repair and complete uninstall/reinstall now pass on the exact final installer with pairing persistence and one-screen identity preserved. The stale Run entry during the uninstalled interval is deferred P2 cleanup debt. Sign-out/reboot remains authorized but unexecuted; true upgrade remains blocked unless an older approved package is supplied.
 5. Remote Ubuntu deployment and production TLS remain **NOT VERIFIED** non-blocking follow-ups.

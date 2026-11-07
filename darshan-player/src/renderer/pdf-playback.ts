@@ -74,6 +74,41 @@ export function validatePdfPageSelection(pageNumber: number, pageCount: number):
   }
 }
 
+export function preparePdfCanvasForRender(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  renderScale: number
+): void {
+  // PDF pages are opaque white. Fill the backing pixels explicitly so an
+  // Electron capture does not interpret an otherwise blank page as transparent.
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.fillStyle = '#fff'
+  context.fillRect(0, 0, width, height)
+  context.setTransform(renderScale, 0, 0, renderScale, 0, 0)
+}
+
+export async function publishPdfCanvasImage(
+  canvas: HTMLCanvasElement,
+  image: HTMLImageElement,
+  shouldPublish: () => boolean = () => true
+): Promise<boolean> {
+  image.style.width = canvas.style.width
+  image.style.height = canvas.style.height
+  image.src = canvas.toDataURL('image/png')
+  if (typeof image.decode === 'function') {
+    try {
+      await image.decode()
+    } catch {
+      // Chromium data URLs are already complete; decode can reject during teardown.
+    }
+  }
+  if (!shouldPublish()) return false
+  image.style.display = 'block'
+  canvas.style.display = 'none'
+  return true
+}
+
 function createStatusElement(message: string): HTMLDivElement {
   const status = document.createElement('div')
   status.textContent = message
@@ -133,6 +168,7 @@ class PdfPlaybackController {
     private readonly container: ManagedPdfElement,
     private readonly source: string,
     private readonly canvas: HTMLCanvasElement,
+    private readonly image: HTMLImageElement,
     private readonly pageNumber: number,
     private readonly context: PdfPlaybackContext
   ) {}
@@ -207,7 +243,7 @@ class PdfPlaybackController {
       const renderGeneration = ++this.renderGeneration
       backBuffer.width = Math.max(1, Math.floor(scaledViewport.width * renderScale))
       backBuffer.height = Math.max(1, Math.floor(scaledViewport.height * renderScale))
-      context.setTransform(renderScale, 0, 0, renderScale, 0, 0)
+      preparePdfCanvasForRender(context, backBuffer.width, backBuffer.height, renderScale)
       this.renderTask = page.render({ canvasContext: context, viewport: scaledViewport })
       await this.renderTask.promise
       if (this.disposed || renderGeneration !== this.renderGeneration) return
@@ -222,6 +258,16 @@ class PdfPlaybackController {
       visibleContext.setTransform(1, 0, 0, 1, 0, 0)
       visibleContext.clearRect(0, 0, this.canvas.width, this.canvas.height)
       visibleContext.drawImage(backBuffer, 0, 0)
+      // Windows compositor capture can omit accelerated canvas pixels even
+      // while the physical player renders them correctly. Mirror the completed
+      // page into an ordinary image layer so screenshots and the display share
+      // the same stable raster. Keep the previous image visible until decode.
+      const published = await publishPdfCanvasImage(
+        this.canvas,
+        this.image,
+        () => !this.disposed && renderGeneration === this.renderGeneration
+      )
+      if (!published) return
       if (!this.disposed) {
         this.container.setAttribute('data-pdf-rendered', 'true')
         this.container.dispatchEvent(new Event('darshan-pdf-rendered'))
@@ -230,20 +276,23 @@ class PdfPlaybackController {
     } catch (error) {
       if (this.disposed) return
       if (error instanceof Error && error.name === 'RenderingCancelledException') return
-      const detail: PdfPlaybackErrorDetail = error instanceof PdfPlaybackError
-        ? { ...error.detail, ...this.context }
-        : {
-            code: 'PDF_RENDER_FAILED',
-            message: error instanceof Error ? error.message : String(error),
-            requestedPage: this.pageNumber,
-            actualPageCount: null,
-            ...this.context,
-          }
+      const detail: PdfPlaybackErrorDetail =
+        error instanceof PdfPlaybackError
+          ? { ...error.detail, ...this.context }
+          : {
+              code: 'PDF_RENDER_FAILED',
+              message: error instanceof Error ? error.message : String(error),
+              requestedPage: this.pageNumber,
+              actualPageCount: null,
+              ...this.context,
+            }
       window.darshan?.log?.('warn', 'PDF preview render failed', detail)
       this.canvas.remove()
-      const visibleReason = detail.code === 'DOCUMENT_PAGE_OUT_OF_RANGE' || detail.code === 'INVALID_DOCUMENT_PAGE'
-        ? detail.message
-        : 'The document could not be displayed.'
+      this.image.remove()
+      const visibleReason =
+        detail.code === 'DOCUMENT_PAGE_OUT_OF_RANGE' || detail.code === 'INVALID_DOCUMENT_PAGE'
+          ? detail.message
+          : 'The document could not be displayed.'
       this.container.appendChild(createStatusElement(`Unavailable\n${visibleReason}`))
       this.container.setAttribute('data-pdf-rendered', 'false')
       this.container.dispatchEvent(new CustomEvent<PdfPlaybackErrorDetail>('darshan-pdf-error', { detail }))
@@ -301,7 +350,15 @@ export function createPdfPlaybackElement(
   canvas.style.maxHeight = '100%'
   canvas.style.background = '#fff'
   container.appendChild(canvas)
-  const controller = new PdfPlaybackController(container, resolvedSource, canvas, pageNumber, context)
+  const image = document.createElement('img')
+  image.alt = `PDF page ${pageNumber}`
+  image.style.display = 'none'
+  image.style.maxWidth = '100%'
+  image.style.maxHeight = '100%'
+  image.style.objectFit = 'contain'
+  image.style.background = '#fff'
+  container.appendChild(image)
+  const controller = new PdfPlaybackController(container, resolvedSource, canvas, image, pageNumber, context)
   container.__darshanCleanup = () => controller.dispose()
   controller.start()
   return container

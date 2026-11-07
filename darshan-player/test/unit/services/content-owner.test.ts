@@ -6,7 +6,10 @@ describe('Exclusive renderer content ownership', () => {
   let owner, window
   beforeEach(() => {
     owner = new ContentOwner()
-    window = { isDestroyed: () => false, webContents: { id: 7, isDestroyed: () => false, send: sinon.spy(), setAudioMuted: sinon.spy() } }
+    window = {
+      isDestroyed: () => false,
+      webContents: { id: 7, isDestroyed: () => false, send: sinon.spy(), setAudioMuted: sinon.spy() },
+    }
     owner.attach(window)
   })
   it('accepts reports only from the actual renderer and exact active epoch', () => {
@@ -21,6 +24,21 @@ describe('Exclusive renderer content ownership', () => {
     expect(owner.attach(window)).to.equal(false)
     expect(owner.getEpoch()).to.equal(epoch)
     expect(owner.accepts(7, epoch)).to.equal(true)
+  })
+  it('invalidates only the renderer that is still attached', () => {
+    const invalidated = sinon.spy()
+    owner.on('invalidated', invalidated)
+    owner.advance('ordinary')
+    expect(owner.detach(7)).to.equal(true)
+    expect(owner.getOwner()).to.equal('blocked')
+    expect(owner.accepts(7, owner.getEpoch())).to.equal(false)
+
+    const replacement = { ...window, webContents: { ...window.webContents, id: 9 } }
+    expect(owner.attach(replacement)).to.equal(true)
+    const replacementEpoch = owner.advance('ordinary')
+    expect(owner.detach(7)).to.equal(false)
+    expect(owner.accepts(9, replacementEpoch)).to.equal(true)
+    expect(invalidated.callCount).to.equal(4)
   })
   it('mutes and fences all old reports before requesting disposal, requiring exact sender and request ACK', async () => {
     const old = owner.advance('live-fallback')

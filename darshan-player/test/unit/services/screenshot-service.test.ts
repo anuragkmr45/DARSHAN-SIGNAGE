@@ -87,6 +87,34 @@ describe('Screenshot Service', () => {
     expect(ordinary.calledOnce).to.equal(true)
   })
 
+  it('uses the composed window capture for ordinary Windows playback', async () => {
+    const { getScreenshotService } = require('../../../src/main/services/screenshot-service')
+    const service = getScreenshotService()
+    const composed = { toPNG: () => Buffer.from('composed-window') }
+    const renderer = sandbox.stub().resolves({ toPNG: () => Buffer.from('renderer-only') })
+    const windowCapture = sandbox.stub().resolves(composed)
+    service.initialize({ webContents: { capturePage: renderer } })
+    service.setContentCaptureProvider(async () => undefined)
+    service.setWindowCaptureProvider(windowCapture)
+
+    expect(await service.capture()).to.equal(composed)
+    expect(windowCapture.calledOnce).to.equal(true)
+    expect(renderer.called).to.equal(false)
+  })
+
+  it('falls back to renderer capture when composed window capture fails', async () => {
+    const { getScreenshotService } = require('../../../src/main/services/screenshot-service')
+    const service = getScreenshotService()
+    const rendererImage = { toPNG: () => Buffer.from('renderer-fallback') }
+    const renderer = sandbox.stub().resolves(rendererImage)
+    service.initialize({ webContents: { capturePage: renderer } })
+    service.setContentCaptureProvider(async () => undefined)
+    service.setWindowCaptureProvider(async () => { throw new Error('capture unavailable') })
+
+    expect(await service.capture()).to.equal(rendererImage)
+    expect(renderer.calledOnce).to.equal(true)
+  })
+
   it('queues screenshot uploads for retry on non-auth failures and removes the local file', async () => {
     const { getScreenshotService } = require('../../../src/main/services/screenshot-service')
     const { getPairingService } = require('../../../src/main/services/pairing-service')

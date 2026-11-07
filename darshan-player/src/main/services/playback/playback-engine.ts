@@ -55,6 +55,27 @@ export class PlaybackEngine extends EventEmitter {
   }
 
   /**
+   * Send renderer state only while the current Electron window is usable.
+   * Window teardown can race with schedule and snapshot callbacks, so the
+   * checks alone are not sufficient: `send` is also contained in case the
+   * renderer is destroyed between the checks and the IPC call.
+   */
+  private sendToRenderer(channel: string, payload: unknown): boolean {
+    const window = this.mainWindow
+    if (!window || window.isDestroyed?.() || window.webContents.isDestroyed?.()) {
+      return false
+    }
+
+    try {
+      window.webContents.send(channel, payload)
+      return true
+    } catch (error) {
+      logger.warn({ error, channel }, 'Renderer IPC unavailable during playback update')
+      return false
+    }
+  }
+
+  /**
    * Start playback
    */
   async start(): Promise<void> {
@@ -136,13 +157,11 @@ export class PlaybackEngine extends EventEmitter {
     const telemetryService = getTelemetryService()
     telemetryService.clearCurrentPlayback()
 
-    if (this.mainWindow) {
-      this.mainWindow.webContents.send('playback-update', {
-        contentEpoch: getContentOwner().getEpoch(),
-        type: 'clear-active',
-        reason: 'timeline-stopped',
-      })
-    }
+    this.sendToRenderer('playback-update', {
+      contentEpoch: getContentOwner().getEpoch(),
+      type: 'clear-active',
+      reason: 'timeline-stopped',
+    })
 
     this.emit('playback-stopped')
   }
@@ -223,8 +242,8 @@ export class PlaybackEngine extends EventEmitter {
 
     this.scheduler.on('timeline-complete', (completion?: { authorityEnded?: boolean }) => {
       logger.debug({ itemType: this.currentItem?.type }, 'Timeline completed')
-      if ((this.currentItem?.type === 'scene' || completion?.authorityEnded === true) && this.mainWindow) {
-        this.mainWindow.webContents.send('playback-update', {
+      if (this.currentItem?.type === 'scene' || completion?.authorityEnded === true) {
+        this.sendToRenderer('playback-update', {
           contentEpoch: getContentOwner().getEpoch(),
           type: 'clear-active',
           reason: completion?.authorityEnded === true ? 'timeline-authority-ended' : 'scene-window-complete',
@@ -283,7 +302,7 @@ export class PlaybackEngine extends EventEmitter {
     logger.info(
       {
         itemId: item.id,
-        pageNumber: item.type === 'pdf' ? item.pageNumber ?? 1 : undefined,
+        pageNumber: item.type === 'pdf' ? (item.pageNumber ?? 1) : undefined,
         type: item.type,
         displayMs: item.displayMs,
       },
@@ -307,16 +326,14 @@ export class PlaybackEngine extends EventEmitter {
     }
 
     // Send to renderer
-    if (this.mainWindow) {
-      this.mainWindow.webContents.send('media-change', {
-        contentEpoch: getContentOwner().getEpoch(),
-        item,
-        scheduledItem,
-        scheduleId: this.currentScheduleId,
-        renderToken: this.currentRenderToken,
-        singleItemFrame: this.currentPlaylistItemCount === 1,
-      })
-    }
+    this.sendToRenderer('media-change', {
+      contentEpoch: getContentOwner().getEpoch(),
+      item,
+      scheduledItem,
+      scheduleId: this.currentScheduleId,
+      renderToken: this.currentRenderToken,
+      singleItemFrame: this.currentPlaylistItemCount === 1,
+    })
 
     this.emit('item-playing', item)
   }
@@ -348,7 +365,7 @@ export class PlaybackEngine extends EventEmitter {
       mediaId: currentMediaId,
       playbackInstanceId: this.currentPlaybackInstanceId,
       itemId: current.id,
-      pageNumber: current.type === 'pdf' ? current.pageNumber ?? 1 : undefined,
+      pageNumber: current.type === 'pdf' ? (current.pageNumber ?? 1) : undefined,
       startedAt: new Date().toISOString(),
     })
     return true
@@ -423,8 +440,8 @@ export class PlaybackEngine extends EventEmitter {
       'Transition starting'
     )
 
-    if (this.mainWindow && next) {
-      this.mainWindow.webContents.send('playback-update', {
+    if (next) {
+      this.sendToRenderer('playback-update', {
         contentEpoch: getContentOwner().getEpoch(),
         type: 'transition-start',
         current: current.item,
@@ -455,13 +472,11 @@ export class PlaybackEngine extends EventEmitter {
       this.emit('playback-error', new PlaybackError('Max errors reached', { error: error.message }))
     } else {
       // Show fallback slide
-      if (this.mainWindow) {
-        this.mainWindow.webContents.send('playback-update', {
-          contentEpoch: getContentOwner().getEpoch(),
-          type: 'show-fallback',
-          message: error.message,
-        })
-      }
+      this.sendToRenderer('playback-update', {
+        contentEpoch: getContentOwner().getEpoch(),
+        type: 'show-fallback',
+        message: error.message,
+      })
     }
   }
 
@@ -486,11 +501,11 @@ export class PlaybackEngine extends EventEmitter {
    * boundary (which could otherwise leave a signage screen blank).
    */
   restoreCurrentItemInRenderer(): boolean {
-    if (!this.mainWindow || !this.currentItem) {
+    if (!this.currentItem) {
       return false
     }
 
-    this.mainWindow.webContents.send('media-change', {
+    return this.sendToRenderer('media-change', {
       contentEpoch: getContentOwner().getEpoch(),
       item: this.currentItem,
       scheduleId: this.currentScheduleId,
@@ -498,7 +513,6 @@ export class PlaybackEngine extends EventEmitter {
       restored: true,
       singleItemFrame: this.currentPlaylistItemCount === 1,
     })
-    return true
   }
 
   /**
@@ -528,7 +542,7 @@ export class PlaybackEngine extends EventEmitter {
       fit: item.fit,
       muted: item.muted,
       loop: item.loop,
-      pageNumber: item.type === 'pdf' ? item.pageNumber ?? 1 : null,
+      pageNumber: item.type === 'pdf' ? (item.pageNumber ?? 1) : null,
       sha256: item.sha256 ?? null,
       transitionDurationMs: item.transitionDurationMs,
       remoteUrl:

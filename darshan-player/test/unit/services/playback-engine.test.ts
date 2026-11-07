@@ -15,7 +15,11 @@ describe('Playback Engine', () => {
 
     Object.keys(require.cache).forEach((key) => {
       const normalizedKey = key.replace(/\\/g, '/')
-      if (normalizedKey.includes('src/main/services/playback') || normalizedKey.includes('src/main/services/snapshot-manager') || normalizedKey.includes('src/common')) {
+      if (
+        normalizedKey.includes('src/main/services/playback') ||
+        normalizedKey.includes('src/main/services/snapshot-manager') ||
+        normalizedKey.includes('src/common')
+      ) {
         delete require.cache[key]
       }
     })
@@ -32,7 +36,11 @@ describe('Playback Engine', () => {
 
     Object.keys(require.cache).forEach((key) => {
       const normalizedKey = key.replace(/\\/g, '/')
-      if (normalizedKey.includes('src/main/services/playback') || normalizedKey.includes('src/main/services/snapshot-manager') || normalizedKey.includes('src/common')) {
+      if (
+        normalizedKey.includes('src/main/services/playback') ||
+        normalizedKey.includes('src/main/services/snapshot-manager') ||
+        normalizedKey.includes('src/common')
+      ) {
         delete require.cache[key]
       }
     })
@@ -53,12 +61,51 @@ describe('Playback Engine', () => {
 
     engine.stop()
 
-    expect(send.calledWithExactly('playback-update', {
-      contentEpoch: require('../../../src/main/services/playback/content-owner').getContentOwner().getEpoch(),
-      type: 'clear-active',
-      reason: 'timeline-stopped',
-    })).to.equal(true)
+    expect(
+      send.calledWithExactly('playback-update', {
+        contentEpoch: require('../../../src/main/services/playback/content-owner').getContentOwner().getEpoch(),
+        type: 'clear-active',
+        reason: 'timeline-stopped',
+      })
+    ).to.equal(true)
     expect(clearCurrentPlayback.calledOnce).to.equal(true)
+  })
+
+  it('stops cleanly when the renderer window was already destroyed', () => {
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+    const { getTelemetryService } = require('../../../src/main/services/telemetry/telemetry-service')
+
+    const send = sandbox.spy()
+    const clearCurrentPlayback = sandbox.spy(getTelemetryService(), 'clearCurrentPlayback')
+    const engine = getPlaybackEngine()
+    engine.initialize({
+      isDestroyed: () => true,
+      webContents: {
+        isDestroyed: () => true,
+        send,
+      },
+    })
+
+    expect(() => engine.stop()).not.to.throw()
+    expect(send.called).to.equal(false)
+    expect(clearCurrentPlayback.calledOnce).to.equal(true)
+  })
+
+  it('contains a renderer teardown race while stopping playback', () => {
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+
+    const engine = getPlaybackEngine()
+    engine.initialize({
+      isDestroyed: () => false,
+      webContents: {
+        isDestroyed: () => false,
+        send: () => {
+          throw new Error('Object has been destroyed')
+        },
+      },
+    })
+
+    expect(() => engine.stop()).not.to.throw()
   })
 
   it('clears an active layout scene when its authoritative timeline ends', () => {
@@ -78,11 +125,13 @@ describe('Playback Engine', () => {
 
     engine.scheduler.emit('timeline-complete')
 
-    expect(send.calledWithExactly('playback-update', {
-      contentEpoch: require('../../../src/main/services/playback/content-owner').getContentOwner().getEpoch(),
-      type: 'clear-active',
-      reason: 'scene-window-complete',
-    })).to.equal(true)
+    expect(
+      send.calledWithExactly('playback-update', {
+        contentEpoch: require('../../../src/main/services/playback/content-owner').getContentOwner().getEpoch(),
+        type: 'clear-active',
+        reason: 'scene-window-complete',
+      })
+    ).to.equal(true)
   })
 
   it('clears a native looping video when its authoritative schedule boundary ends', () => {
@@ -102,11 +151,13 @@ describe('Playback Engine', () => {
 
     engine.scheduler.emit('timeline-complete', { willRepeat: false, authorityEnded: true })
 
-    expect(send.calledWithExactly('playback-update', {
-      contentEpoch: require('../../../src/main/services/playback/content-owner').getContentOwner().getEpoch(),
-      type: 'clear-active',
-      reason: 'timeline-authority-ended',
-    })).to.equal(true)
+    expect(
+      send.calledWithExactly('playback-update', {
+        contentEpoch: require('../../../src/main/services/playback/content-owner').getContentOwner().getEpoch(),
+        type: 'clear-active',
+        reason: 'timeline-authority-ended',
+      })
+    ).to.equal(true)
   })
 
   it('preserves one-item retry behavior when restoring the current renderer item', () => {
@@ -128,12 +179,17 @@ describe('Playback Engine', () => {
     }
 
     expect(engine.restoreCurrentItemInRenderer()).to.equal(true)
-    expect(send.calledWith('media-change', sinon.match({
-      scheduleId: 'schedule-1',
-      renderToken: 'render-token-1',
-      restored: true,
-      singleItemFrame: true,
-    }))).to.equal(true)
+    expect(
+      send.calledWith(
+        'media-change',
+        sinon.match({
+          scheduleId: 'schedule-1',
+          renderToken: 'render-token-1',
+          restored: true,
+          singleItemFrame: true,
+        })
+      )
+    ).to.equal(true)
   })
 
   it('ignores equivalent timeline playlist updates when only presigned asset urls changed', async () => {
@@ -196,11 +252,20 @@ describe('Playback Engine', () => {
     const base = {
       mode: 'normal',
       scheduleId: 'schedule-1',
-      items: [{
-        id: 'pdf-item', type: 'pdf', mediaId: 'media-pdf', remoteUrl: 'https://cdn.example/doc.pdf',
-        displayMs: 10000, fit: 'contain', muted: true, loop: false, transitionDurationMs: 0,
-        pageNumber: 1,
-      }],
+      items: [
+        {
+          id: 'pdf-item',
+          type: 'pdf',
+          mediaId: 'media-pdf',
+          remoteUrl: 'https://cdn.example/doc.pdf',
+          displayMs: 10000,
+          fit: 'contain',
+          muted: true,
+          loop: false,
+          transitionDurationMs: 0,
+          pageNumber: 1,
+        },
+      ],
     }
 
     const pageOne = engine.fingerprintPlaylist(base)
@@ -248,24 +313,30 @@ describe('Playback Engine', () => {
 
     expect(recordStart.called).to.equal(false)
     const renderToken = send.firstCall.args[1].renderToken
-    expect(engine.confirmRenderedPlayback({
-      itemId: 'pdf-item',
-      mediaId: 'media-pdf',
-      renderToken,
-      pageNumber: 3,
-    })).to.equal(true)
-    expect(recordStart.calledWithMatch({
-      scheduleId: 'schedule-1',
-      publishId: 'publish-1',
-      mediaId: 'media-pdf',
-      pageNumber: 3,
-    })).to.equal(true)
-    expect(engine.confirmRenderedPlayback({
-      itemId: 'pdf-item',
-      mediaId: 'media-pdf',
-      renderToken,
-      pageNumber: 3,
-    })).to.equal(false)
+    expect(
+      engine.confirmRenderedPlayback({
+        itemId: 'pdf-item',
+        mediaId: 'media-pdf',
+        renderToken,
+        pageNumber: 3,
+      })
+    ).to.equal(true)
+    expect(
+      recordStart.calledWithMatch({
+        scheduleId: 'schedule-1',
+        publishId: 'publish-1',
+        mediaId: 'media-pdf',
+        pageNumber: 3,
+      })
+    ).to.equal(true)
+    expect(
+      engine.confirmRenderedPlayback({
+        itemId: 'pdf-item',
+        mediaId: 'media-pdf',
+        renderToken,
+        pageNumber: 3,
+      })
+    ).to.equal(false)
   })
 
   it('records layout proof-of-play with the authoritative applied publish identity', () => {
@@ -285,22 +356,26 @@ describe('Playback Engine', () => {
     }
     const recordStart = sandbox.stub(getProofOfPlayService(), 'recordStart')
 
-    expect(engine.recordRenderedLayoutPlayback({
-      scene_id: 'scene-1',
-      slot_id: 'slot-1',
-      item_id: 'item-1',
-      media_id: 'media-1',
-      schedule_id: 'schedule-1',
-      playback_instance_id: 'layout-instance-1',
-      started_at: '2000-01-01T00:00:00.000Z',
-    })).to.equal(true)
+    expect(
+      engine.recordRenderedLayoutPlayback({
+        scene_id: 'scene-1',
+        slot_id: 'slot-1',
+        item_id: 'item-1',
+        media_id: 'media-1',
+        schedule_id: 'schedule-1',
+        playback_instance_id: 'layout-instance-1',
+        started_at: '2000-01-01T00:00:00.000Z',
+      })
+    ).to.equal(true)
 
-    expect(recordStart.calledWithMatch({
-      scheduleId: 'schedule-1',
-      publishId: 'publish-layout-1',
-      mediaId: 'media-1',
-      playbackInstanceId: 'layout-instance-1',
-    })).to.equal(true)
+    expect(
+      recordStart.calledWithMatch({
+        scheduleId: 'schedule-1',
+        publishId: 'publish-layout-1',
+        mediaId: 'media-1',
+        playbackInstanceId: 'layout-instance-1',
+      })
+    ).to.equal(true)
     expect(recordStart.firstCall.args[0].startedAt).not.to.equal('2000-01-01T00:00:00.000Z')
   })
 
@@ -313,8 +388,15 @@ describe('Playback Engine', () => {
     const send = sandbox.spy()
     engine.mainWindow = { webContents: { send } }
     const item = {
-      id: 'late-image', type: 'image', mediaId: 'media-late', remoteUrl: 'https://cdn.example/late.png',
-      displayMs: 1000, fit: 'contain', muted: true, loop: false, transitionDurationMs: 0,
+      id: 'late-image',
+      type: 'image',
+      mediaId: 'media-late',
+      remoteUrl: 'https://cdn.example/late.png',
+      displayMs: 1000,
+      fit: 'contain',
+      muted: true,
+      loop: false,
+      transitionDurationMs: 0,
     }
     const scheduledItem = { item, startTime: Date.now(), endTime: Date.now() + 1000, index: 0 }
 
@@ -322,11 +404,13 @@ describe('Playback Engine', () => {
     const renderToken = send.firstCall.args[1].renderToken
     engine.handleItemComplete(scheduledItem)
 
-    expect(engine.confirmRenderedPlayback({
-      itemId: item.id,
-      mediaId: item.mediaId,
-      renderToken,
-    })).to.equal(false)
+    expect(
+      engine.confirmRenderedPlayback({
+        itemId: item.id,
+        mediaId: item.mediaId,
+        renderToken,
+      })
+    ).to.equal(false)
     expect(recordStart.called).to.equal(false)
   })
 

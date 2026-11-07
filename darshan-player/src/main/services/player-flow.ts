@@ -28,6 +28,7 @@ import { getTelemetryService } from './telemetry/telemetry-service'
 import { getHeartbeatService } from './telemetry/heartbeat'
 import { getCommandProcessor } from './command-processor'
 import { getScreenshotService } from './screenshot-service'
+import { captureWindowsBrowserWindow } from './windows-window-capture'
 import { getDefaultMediaService } from './settings/default-media-service'
 import { getLifecycleEvents, RuntimeAuthFailureEvent } from './lifecycle-events'
 import { getHttpClient } from './network/http-client'
@@ -160,6 +161,7 @@ export class PlayerFlow extends EventEmitter {
     const playbackEngine = getPlaybackEngine()
     playbackEngine.initialize(mainWindow)
     getScreenshotService().initialize(mainWindow)
+    getScreenshotService().setWindowCaptureProvider(() => captureWindowsBrowserWindow(mainWindow))
     getDefaultMediaService().initialize(mainWindow)
     mainWindow.webContents.setAudioMuted(false)
     this.updateStatus({})
@@ -1506,16 +1508,28 @@ export class PlayerFlow extends EventEmitter {
       // A deleted screen loses its certificate before its next authenticated
       // request. Confirm the missing screen through REST before clearing local
       // identity; a revoked credential can still belong to an existing screen.
+      let confirmedRecoveryNeedsReconciliation = false
       try {
         const status = await this.pairingService.fetchPairingStatus()
         if (status.device_id === this.pairingService.getDeviceId() && !status.screen && !status.active_pairing) {
           await this.enterHardRecovery('Screen was removed from the backend')
           return
         }
+        confirmedRecoveryNeedsReconciliation =
+          status.device_id === this.pairingService.getDeviceId() &&
+          status.active_pairing?.mode === 'RECOVERY' &&
+          status.active_pairing.confirmed === true
       } catch (error) {
         logger.warn({ error }, 'Could not confirm screen identity after authentication failure')
       }
       await this.enterRecoveryRequired(event.error.message || 'Device credentials are no longer valid')
+      if (confirmedRecoveryNeedsReconciliation) {
+        // The confirmation response is already authoritative. Reconcile it now
+        // instead of leaving the stale authentication reason visible until the
+        // next timer-driven poll.
+        this.stopPairingTimers()
+        await this.pollRecoveryStatus()
+      }
       return
     }
 

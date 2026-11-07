@@ -26,8 +26,10 @@ export class ScreenshotService {
   private screenshotDir: string
   private captureEnabled = false
   private contentCapture?: () => Promise<NativeImage | undefined>
+  private windowCapture?: () => Promise<NativeImage | undefined>
 
   setContentCaptureProvider(provider?: () => Promise<NativeImage | undefined>): void { this.contentCapture = provider }
+  setWindowCaptureProvider(provider?: () => Promise<NativeImage | undefined>): void { this.windowCapture = provider }
 
   constructor() {
     const config = getConfigManager().getConfig()
@@ -101,8 +103,16 @@ export class ScreenshotService {
     logger.info('Capturing screenshot')
 
     try {
-      // Capture screenshot using Electron's native capture
-      const image = await this.contentCapture?.() ?? await this.mainWindow.webContents.capturePage()
+      const managedContent = await this.contentCapture?.()
+      let compositedWindow: NativeImage | undefined
+      if (!managedContent && this.windowCapture) {
+        try {
+          compositedWindow = await this.windowCapture()
+        } catch (error) {
+          logger.warn({ error }, 'Composited window capture failed; falling back to renderer capture')
+        }
+      }
+      const image = managedContent ?? compositedWindow ?? await this.mainWindow.webContents.capturePage()
 
       logger.info({ size: image.toPNG().length }, 'Screenshot captured')
 

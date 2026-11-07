@@ -29,11 +29,13 @@ import { registerNormalProfileAutostart } from './live-development-profile'
 import { getDisplayManager } from './services/display-manager'
 import { RendererReadinessGate } from './services/renderer-readiness-gate'
 import { getPlaybackEngine } from './services/playback/playback-engine'
+import { retainRecordedActiveSlots } from './services/playback/active-slot-tracker'
 import { getContentOwner } from './services/playback/content-owner'
 import { getPlayerFlow } from './services/player-flow'
 import { getProofOfPlayService } from './services/pop-service'
 import { getCacheManager } from './services/cache/cache-manager'
 import { getTelemetryService } from './services/telemetry/telemetry-service'
+import { recoverOrFocusWindow } from './window-recovery'
 
 console.log('Initializing logger...')
 const logger = getLogger('main')
@@ -60,11 +62,8 @@ if (!gotTheLock) {
 } else if (!operatorCommand) {
   app.on('second-instance', () => {
     logger.warn('Attempted to start second instance')
-    // Focus the existing window if it exists
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
-    }
+    const result = recoverOrFocusWindow(mainWindow, createWindow)
+    logger.info({ result }, 'Handled second-instance window recovery')
   })
 }
 
@@ -85,6 +84,7 @@ getContentOwner().on('invalidated', () => {
   getTelemetryService().clearCurrentPlayback()
 })
 let servicesInitialized = false
+let applicationShuttingDown = false
 let readyToShowWindow: BrowserWindow | null = null
 let rendererLayoutAcknowledgedWindow: BrowserWindow | null = null
 const rendererReadinessGate = new RendererReadinessGate<BrowserWindow>()
@@ -466,25 +466,33 @@ function createWindow(): void {
     }, RENDERER_LAYOUT_ACK_TIMEOUT_MS)
   })
 
+  const window = mainWindow
+  const windowSenderId = window.webContents.id
+
   // Handle window closed
-  mainWindow.on('closed', () => {
+  window.on('closed', () => {
+    const wasCurrentWindow = mainWindow === window
     getPlayerFlow().interruptLive('WINDOW_CLOSED')
-    if (readyToShowWindow === mainWindow) {
+    if (readyToShowWindow === window) {
       readyToShowWindow = null
       clearRendererLayoutAckTimer()
     }
-    if (rendererLayoutAcknowledgedWindow === mainWindow) rendererLayoutAcknowledgedWindow = null
-    if (mainWindow) rendererReadinessGate.clear(mainWindow)
-    getDisplayManager().detachWindow(mainWindow ?? undefined)
-    mainWindow = null
-    logger.info('Main window closed')
+    if (rendererLayoutAcknowledgedWindow === window) rendererLayoutAcknowledgedWindow = null
+    rendererReadinessGate.clear(window)
+    getDisplayManager().detachWindow(window)
+    getContentOwner().detach(windowSenderId)
+    if (wasCurrentWindow) mainWindow = null
+    logger.info({ recoveryScheduled: wasCurrentWindow && !applicationShuttingDown }, 'Main window closed')
+    if (wasCurrentWindow && !applicationShuttingDown) {
+      recoverOrFocusWindow(mainWindow, createWindow)
+    }
   })
 
   // Handle crashes - use render-process-gone instead of deprecated 'crashed'
-  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+  window.webContents.on('render-process-gone', (_event, details) => {
     getPlayerFlow().interruptLive('RENDERER_CRASHED')
     logger.error({ reason: details.reason, exitCode: details.exitCode }, 'Renderer process gone')
-    handleCrash()
+    handleCrash(window)
   })
   mainWindow.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
     if (isMainFrame) {
@@ -516,16 +524,15 @@ function createWindow(): void {
 /**
  * Handle application crash with bounded exponential backoff
  */
-function handleCrash(): void {
+function handleCrash(crashedWindow: BrowserWindow): void {
   const delay = restartBackoff.getDelay()
   logger.info({ delay, attempt: restartBackoff.getAttempt() }, 'Scheduling restart after crash')
 
   setTimeout(() => {
-    if (mainWindow) {
-      mainWindow.destroy()
-      mainWindow = null
-    }
-    createWindow()
+    if (applicationShuttingDown || mainWindow !== crashedWindow) return
+    mainWindow = null
+    if (!crashedWindow.isDestroyed()) crashedWindow.destroy()
+    if (!applicationShuttingDown && mainWindow === null) createWindow()
   }, delay)
 }
 
@@ -643,10 +650,18 @@ function isPrivateIpv4(hostname: string): boolean {
  */
 function setupIPCHandlers(): void {
   const { ipcMain } = require('electron')
-  ipcMain.handle('live-receiver:grant', (event: Electron.IpcMainInvokeEvent) => getPlayerFlow().getLiveReceiverGrant(event.sender.id))
-  ipcMain.handle('live-receiver:lease', (event: Electron.IpcMainInvokeEvent) => getPlayerFlow().getLiveReceiverLease(event.sender.id))
-  ipcMain.on('live-receiver:observation', (event: Electron.IpcMainEvent, value: unknown) => getPlayerFlow().reportLiveReceiver(event.sender.id, value))
-  ipcMain.on('playback-owner:disposed', (event: Electron.IpcMainEvent, value: unknown) => getContentOwner().acknowledge(event.sender.id, value))
+  ipcMain.handle('live-receiver:grant', (event: Electron.IpcMainInvokeEvent) =>
+    getPlayerFlow().getLiveReceiverGrant(event.sender.id)
+  )
+  ipcMain.handle('live-receiver:lease', (event: Electron.IpcMainInvokeEvent) =>
+    getPlayerFlow().getLiveReceiverLease(event.sender.id)
+  )
+  ipcMain.on('live-receiver:observation', (event: Electron.IpcMainEvent, value: unknown) =>
+    getPlayerFlow().reportLiveReceiver(event.sender.id, value)
+  )
+  ipcMain.on('playback-owner:disposed', (event: Electron.IpcMainEvent, value: unknown) =>
+    getContentOwner().acknowledge(event.sender.id, value)
+  )
 
   ipcMain.handle('config:get', async () => config.getConfig())
 
@@ -825,14 +840,15 @@ function setupIPCHandlers(): void {
           }
         }
 
-        for (const [playbackInstanceId, slot] of nextSlots.entries()) {
-          if (lastReportedActiveSlots.has(playbackInstanceId)) {
-            continue
-          }
-          getPlaybackEngine().recordRenderedLayoutPlayback(slot)
-        }
-
-        lastReportedActiveSlots = nextSlots
+        // A renderer can report its first visible layout frame before the
+        // playback engine has installed the matching scene. Only remember a
+        // slot after PoP accepts it so a later heartbeat can retry that short
+        // startup race instead of losing the entire interval.
+        lastReportedActiveSlots = retainRecordedActiveSlots(
+          lastReportedActiveSlots,
+          nextSlots,
+          (slot) => getPlaybackEngine().recordRenderedLayoutPlayback(slot)
+        )
         getTelemetryService().setActivePlayback(sceneId, activeSlots)
         getCacheManager().replaceNowPlaying(
           activeSlots
@@ -847,7 +863,10 @@ function setupIPCHandlers(): void {
 
   ipcMain.handle(
     'player-media-started',
-    async (event: any, payload: { contentEpoch?: string; itemId?: string; mediaId?: string; renderToken?: string; pageNumber?: number }) => {
+    async (
+      event: any,
+      payload: { contentEpoch?: string; itemId?: string; mediaId?: string; renderToken?: string; pageNumber?: number }
+    ) => {
       if (!getContentOwner().accepts(event.sender.id, payload?.contentEpoch)) return { accepted: false }
       const accepted = getPlaybackEngine().confirmRenderedPlayback({
         itemId: typeof payload?.itemId === 'string' ? payload.itemId : '',
@@ -1007,7 +1026,6 @@ app.on('web-contents-created', (_event, contents) => {
       }
     })
   }
-
 })
 
 app.on('window-all-closed', () => {
@@ -1016,17 +1034,16 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
-  // On macOS, re-create window when dock icon is clicked
-  if (mainWindow === null) {
-    createWindow()
-  }
+  recoverOrFocusWindow(mainWindow, createWindow)
 })
 
 app.on('before-quit', async (event) => {
   if (operatorCommand) {
     return
   }
+  if (applicationShuttingDown) return
   event.preventDefault()
+  applicationShuttingDown = true
   await cleanup()
   app.exit(0)
 })
