@@ -903,3 +903,11 @@ WINDOWS_PLAYER_CANDIDATE_BLOCKED
 - True upgrade still requires an older approved installer. Remote Ubuntu deployment and production TLS remain explicitly **NOT VERIFIED** non-blocking follow-ups for this isolated local run.
 
 The release decision remains blocked pending Administrator consent and the remaining visible/physical gates above; it is not honest to convert the candidate to ship-ready solely from automated coverage.
+
+### Persistent profile and ordinary restart closure
+
+Administrator consent completed at 11:10 on 2026-11-07. The validated helper preserved the former remote profile as `C:\ProgramData\DARSHAN\config.pre-local-20261107.json` and installed the verified nested local profile as `C:\ProgramData\DARSHAN\config.json`. The destination SHA-256 is `CCE0E8303F4D5CB8E6426BCEDA190B820700C5AE921DA8A9400321131FF29B65`; the resolved endpoints are `http://localhost:18444` and `ws://localhost:18444/socket.io`.
+
+An ordinary installed-player restart, launched without process-scoped configuration overrides, resolved the local CMS and socket endpoints successfully. The prior identity had already been invalidated by the supported deletion/re-pair journey, so the player correctly produced a new pairing request. CMS approved that request as dedicated screen `WIN-QA-20261105-LOCAL-AUTOSTART`; CMS immediately showed Online, Auth OK and Heartbeat OK.
+
+A second ordinary installed-player restart then reused that same persisted device identity and certificate without another pairing code. Logs recorded local backend resolution, `BOOTSTRAP_AUTH`, heartbeat and snapshot-manager startup, and `PAIRED_RUNTIME`. The installed process returned as one four-process tree. Persistent profile and ordinary-restart identity reuse are therefore PASS. Reboot/login autostart observation remains the final OS lifecycle proof.
