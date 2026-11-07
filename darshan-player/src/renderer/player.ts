@@ -631,7 +631,7 @@ class Player {
 
     const message = document.createElement('div')
     message.className = 'player-emergency-copy'
-    message.textContent = String(item.meta?.['message'] ?? 'Emergency alert')
+    message.textContent = String(item.meta?.['message'] ?? item.meta?.['emergency_message'] ?? 'Emergency alert')
 
     const footer = document.createElement('div')
     footer.className = 'player-emergency-footer'
@@ -1158,7 +1158,10 @@ class Player {
       error: error.message,
       singleItemFrame: options.singleItemFrame === true,
     })
-    const unavailable = this.createMediaPreviewCard(item, 'Unavailable', 'This video could not be played.')
+    const emergencyMessage = item.meta?.['emergency_message']
+    const unavailable = typeof emergencyMessage === 'string'
+      ? this.renderEmergencyMessage(item)
+      : this.createMediaPreviewCard(item, 'Unavailable', 'This video could not be played.')
     this.showElement(unavailable, undefined, 0)
     this.currentElement = unavailable
 

@@ -69,6 +69,9 @@ is completed. This source checkpoint is not human QA approval.
   before revealing fallback. Reconnection/resume requires fresh authority and
   a fresh admission. A disposal timeout keeps the old renderer muted and
   reloads it; it cannot unmute old DOM/audio.
+- Emergency image or video failures, including failures after playback starts,
+  immediately restore the native emergency message. Media retries run while
+  that message remains visible and can replace it only after playback is ready.
 - Run observations are separate from ordinary media proof-of-play. They report
   player receipt/subscription/decoded-frame/audio evidence, not physical-display
   confirmation. Screenshot capture selects the currently visible authorized

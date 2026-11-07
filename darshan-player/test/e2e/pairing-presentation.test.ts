@@ -621,6 +621,97 @@ describe('Pairing presentation browser regression', () => {
       })
     }
 
+    // Missing or corrupt emergency images must fall back to native text rather
+    // than handing the screen back to ordinary or default content.
+    await evaluate(session, `(() => {
+      const originalCreateElement = document.createElement.bind(document);
+      window.__darshanOriginalCreateElement = document.createElement;
+      document.createElement = function(tagName, options) {
+        const element = originalCreateElement(tagName, options);
+        if (String(tagName).toLowerCase() === 'img') {
+          setTimeout(() => element.dispatchEvent(new Event('error')), 0);
+        }
+        return element;
+      };
+      window.__darshanE2E.emitMedia({
+        contentEpoch: 'emergency-e2e',
+        item: {
+          id: 'emergency-image-missing', type: 'image', displayMs: 10000,
+          fit: 'contain', muted: true,
+          remoteUrl: 'https://media.invalid/emergency-missing.png',
+          meta: {
+            severity: 'HIGH',
+            emergency_message: 'Shelter in the nearest marked safe area.'
+          }
+        }
+      });
+    })()`)
+    await waitFor(session,
+      "document.querySelector('.player-emergency-copy')?.textContent === 'Shelter in the nearest marked safe area.'",
+      'native emergency text after missing image')
+    await evaluate(session, `(() => {
+      document.createElement = window.__darshanOriginalCreateElement;
+      delete window.__darshanOriginalCreateElement;
+    })()`)
+
+    // A video can fail after its first frame, outside playMedia's initial
+    // rejection path. Emergency text must replace the failed media immediately
+    // and remain authoritative while the bounded media retry runs.
+    await evaluate(session, `(() => {
+      const originalCreateElement = document.createElement.bind(document);
+      const mediaSource = new MediaSource();
+      window.__darshanEmergencyMediaSource = mediaSource;
+      window.__darshanEmergencyVideoUrl = URL.createObjectURL(mediaSource);
+      window.__darshanOriginalCreateElement = document.createElement;
+      document.createElement = function(tagName, options) {
+        const element = originalCreateElement(tagName, options);
+        if (String(tagName).toLowerCase() === 'video') {
+          window.__darshanEmergencyVideo = element;
+          Object.defineProperty(element, 'duration', { configurable: true, value: 10 });
+          element.play = () => Promise.resolve();
+          setTimeout(() => element.dispatchEvent(new Event('loadedmetadata')), 0);
+        }
+        return element;
+      };
+      window.__darshanE2E.emitMedia({
+        contentEpoch: 'emergency-e2e',
+        item: {
+          id: 'emergency-video-late-failure', type: 'video', displayMs: 10000,
+          fit: 'contain', muted: true, loop: true,
+          remoteUrl: window.__darshanEmergencyVideoUrl,
+          meta: {
+            severity: 'CRITICAL',
+            emergency_message: 'Evacuate using the marked east exit.'
+          }
+        }
+      });
+    })()`)
+    await waitFor(session,
+      "document.querySelector('.player-emergency-media video') !== null",
+      'emergency video playback')
+    await evaluate(session, `window.__darshanEmergencyVideo.dispatchEvent(new Event('error'))`)
+    await waitFor(session,
+      "document.querySelector('.player-emergency-heading')?.textContent === 'CRITICAL EMERGENCY'",
+      'native emergency text after late video failure')
+    const emergencyVideoFailure = await evaluate(session, `(() => ({
+      message: document.querySelector('.player-emergency-copy')?.textContent,
+      alert: document.querySelector('.player-emergency')?.getAttribute('role'),
+      failedVideoRemoved: document.querySelector('.player-emergency-media video') === null,
+    }))()`)
+    expect(emergencyVideoFailure).to.deep.equal({
+      message: 'Evacuate using the marked east exit.',
+      alert: 'alert',
+      failedVideoRemoved: true,
+    })
+    await evaluate(session, `(() => {
+      document.createElement = window.__darshanOriginalCreateElement;
+      URL.revokeObjectURL(window.__darshanEmergencyVideoUrl);
+      delete window.__darshanEmergencyVideo;
+      delete window.__darshanEmergencyMediaSource;
+      delete window.__darshanEmergencyVideoUrl;
+      delete window.__darshanOriginalCreateElement;
+    })()`)
+
     await session.command('Emulation.setDeviceMetricsOverride', {
       width: 390, height: 844, deviceScaleFactor: 1, mobile: false,
     })
