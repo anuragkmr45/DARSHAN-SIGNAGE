@@ -14,9 +14,17 @@ describe('Normal LIVE snapshot/cache/authority ownership integration', function 
   it('waits for actual downloaded CAS bytes and renderer cleanup, then blocks post-ready corrupt offline fallback', async () => {
     clearModules()
     const sandbox = sinon.createSandbox(), dir = createTempDir('live-normal-integration-')
-    const previousConfig = process.env.HEXMON_CONFIG_PATH
-    process.env.HEXMON_CONFIG_PATH = path.join(dir, 'config.json')
-    fs.writeFileSync(process.env.HEXMON_CONFIG_PATH, JSON.stringify({ deviceId: LIVE_IDS.device, apiBase: 'https://backend.example.test', livePlayback: { enabled: true },
+    const previousEnvironment = {
+      DARSHAN_CONFIG_PATH: process.env.DARSHAN_CONFIG_PATH,
+      DARSHAN_RUNTIME_ROOT: process.env.DARSHAN_RUNTIME_ROOT,
+      DARSHAN_PLAYER_CONFIG_FILE: process.env.DARSHAN_PLAYER_CONFIG_FILE,
+      HEXMON_CONFIG_PATH: process.env.HEXMON_CONFIG_PATH,
+    }
+    process.env.DARSHAN_RUNTIME_ROOT = dir
+    process.env.DARSHAN_CONFIG_PATH = path.join(dir, 'config.json')
+    delete process.env.DARSHAN_PLAYER_CONFIG_FILE
+    delete process.env.HEXMON_CONFIG_PATH
+    fs.writeFileSync(process.env.DARSHAN_CONFIG_PATH, JSON.stringify({ deviceId: LIVE_IDS.device, apiBase: 'https://backend.example.test', livePlayback: { enabled: true },
       cache: { path: path.join(dir, 'cache'), maxBytes: 10485760 }, mtls: { enabled: false, certPath: path.join(dir, 'certs/client.crt'), keyPath: path.join(dir, 'certs/client.key'), caPath: path.join(dir, 'certs/ca.crt') } }))
     const fixture = liveFixture()
     let releaseDownload
@@ -99,8 +107,10 @@ describe('Normal LIVE snapshot/cache/authority ownership integration', function 
       for (const socket of sockets) socket.destroy()
       await new Promise(resolve => server.close(resolve))
       sandbox.restore()
-      if (previousConfig === undefined) delete process.env.HEXMON_CONFIG_PATH
-      else process.env.HEXMON_CONFIG_PATH = previousConfig
+      for (const [name, value] of Object.entries(previousEnvironment)) {
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      }
       cleanupTempDir(dir); clearModules()
     }
   })

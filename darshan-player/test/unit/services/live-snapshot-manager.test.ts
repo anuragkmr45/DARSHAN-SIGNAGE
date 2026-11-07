@@ -18,12 +18,22 @@ function deferred() {
 
 describe('LIVE snapshot preparation authority', () => {
   let tempDir, sandbox, manager, preparation, heartbeat, response
+  let previousEnvironment
   beforeEach(() => {
     clearLiveModules()
     sandbox = sinon.createSandbox()
     tempDir = createTempDir('live-snapshot-')
-    process.env.HEXMON_CONFIG_PATH = path.join(tempDir, 'config.json')
-    fs.writeFileSync(process.env.HEXMON_CONFIG_PATH, JSON.stringify({ deviceId: LIVE_IDS.device,
+    previousEnvironment = {
+      DARSHAN_CONFIG_PATH: process.env.DARSHAN_CONFIG_PATH,
+      DARSHAN_RUNTIME_ROOT: process.env.DARSHAN_RUNTIME_ROOT,
+      DARSHAN_PLAYER_CONFIG_FILE: process.env.DARSHAN_PLAYER_CONFIG_FILE,
+      HEXMON_CONFIG_PATH: process.env.HEXMON_CONFIG_PATH,
+    }
+    process.env.DARSHAN_RUNTIME_ROOT = tempDir
+    process.env.DARSHAN_CONFIG_PATH = path.join(tempDir, 'config.json')
+    delete process.env.DARSHAN_PLAYER_CONFIG_FILE
+    delete process.env.HEXMON_CONFIG_PATH
+    fs.writeFileSync(process.env.DARSHAN_CONFIG_PATH, JSON.stringify({ deviceId: LIVE_IDS.device,
       apiBase: 'https://backend.example.test', wsUrl: 'wss://backend.example.test/ws',
       cache: { path: path.join(tempDir, 'cache'), maxBytes: 10485760 }, livePlayback: { enabled: true }, mtls: { enabled: false, certPath: path.join(tempDir, 'certs/client.crt'), keyPath: path.join(tempDir, 'certs/client.key'), caPath: path.join(tempDir, 'certs/ca.crt') } }))
     const { getPairingService } = require('../../../src/main/services/pairing-service')
@@ -49,7 +59,10 @@ describe('LIVE snapshot preparation authority', () => {
     await manager.mediaCompletion
     manager.stop()
     sandbox.restore()
-    delete process.env.HEXMON_CONFIG_PATH
+    for (const [name, value] of Object.entries(previousEnvironment)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
     cleanupTempDir(tempDir)
     clearLiveModules()
   })
