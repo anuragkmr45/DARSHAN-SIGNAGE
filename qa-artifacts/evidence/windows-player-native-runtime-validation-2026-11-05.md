@@ -1,6 +1,6 @@
 # Windows Player Native Runtime Validation — 2026-11-05
 
-Status: **IN PROGRESS — pairing, local-Docker CMS, default/offline, single-instance, active-video restart/PoP, selected-page PDF restart/rendering/delivery/PoP/snapshot, automatic-window recovery, installed-process restart, supported deletion and fresh re-pair gates pass; remaining work includes persistent local-profile elevation before sign-out/reboot/autostart, two-session convergence, listed edge fixtures and final closeout**
+Status: **FINAL RELEASE DECISION — isolated local-Docker QA is usable, but broader Windows shipment is blocked by the persistent site-profile/autostart defect and unclosed release gates listed below**
 
 This record covers the isolated Windows QA deployment only. It is not production approval.
 
@@ -872,3 +872,21 @@ online screen suffix `1421` and protected revoked audit screen `4bcc`.
 3. Missing/corrupt image/video runtime fallback, physical audible-output confirmation, missing emergency media and group/site default priority remain open. The final automated regression gates are recorded above. Supported deletion, the sub-five-second fresh-pairing transition and subsequent local re-pair now pass. The old revoked record remains correctly protected until its retained schedule parent can be removed safely. Large-image, corrupt/encrypted-PDF ingest, one-page/selected-page PDF, mute/loop-off and loop-on semantics have evidence above.
 4. Same-package repair and complete uninstall/reinstall pass on the exact final installer. The stale Run entry during the uninstalled interval is deferred P2 cleanup debt. Sign-out/reboot remains authorized but must wait for an Administrator update to the persistent ProgramData local site profile (or an equivalent valid nested selector); true upgrade remains blocked unless an older approved package is supplied.
 5. Remote Ubuntu deployment and production TLS remain **NOT VERIFIED** non-blocking follow-ups.
+
+## Final candidate readiness report — 2026-11-07
+
+- Branch: `codex/windows-player-runtime-validation-20261105`.
+- Validation evidence head before this final report: `26cd907`.
+- Installed unsigned candidate: `DARSHAN-Player Setup 1.0.0.exe`, 105,360,901 bytes, SHA-256 `af0a1fd625a6c3e7a7454cc6765017f986e4e7bbbd6bbcc3b8dbc68826ef7845`.
+- Installed executable: 188,802,048 bytes, SHA-256 `28f9dcfeb3a37ba1ebe49971a8b6ffaa88c840c9dbafa7a33790cb7128e008de`.
+- Runtime at decision time: one four-process installed player tree; local CMS, API, PostgreSQL, MinIO and supporting Docker services running; `/api/v1/health/ready` returned ready with database, migrations, bootstrap, MinIO and worker checks healthy.
+- Principal fixes: Windows runtime hardening (`ab689a2`), renderer-restart recovery (`c911144`), offline/runtime and PDF capture recovery (`c84dd2c`), and CMS post-pair fleet-summary invalidation (`bed27d4`).
+- Passed journeys: native install/repair/uninstall/reinstall; first pairing, renewal, stale-code rejection and credential reuse; CMS screen details and telemetry; image/video/PDF playback; default/schedule transitions; delivery, proof of play and screenshots; future/group targeting and conflict rejection; cached offline playback and recovery; targeted emergency/restart/disconnected clear; paired operator tools and cache redownload; deletion guard, supported deletion, sub-five-second fresh-pairing transition and fresh re-pair.
+- Automated evidence: player integration 6/6, performance 8/8, fault injection 22/22, production build, lint with zero errors; CMS Screens 22/22, CMS build and bundle budget pass. The full player unit run recorded 552 pass, 9 pending and 7 failures: six documented host prerequisites and one suite-order timeout that passed independently.
+- OS-dependent evidence: one 1920×1080 display at 150% scale, native Windows/AppData paths, single-instance behavior, fullscreen and tested keyboard restrictions passed. Physical audible output, whole-machine sleep, physical cursor/Alt+Tab and multi-monitor placement remain unverified.
+- Release-blocking P1: an ordinary installed/Run launch still reads the administrator-owned ProgramData profile for the retired remote backend. The verified local-Docker runtime currently requires a process-scoped nested site profile. Sign-out/reboot autostart therefore cannot be trusted until the persistent ProgramData profile or an equivalent valid selector is installed with Administrator rights and the approved lifecycle journey passes.
+- Additional open gates: two simultaneous CMS-session convergence; missing/corrupt image and video runtime fallback; missing emergency media; group/site default priority; true upgrade without an older approved installer. Remote Ubuntu deployment and production TLS are explicitly not verified and remain non-blocking follow-ups for this local run.
+- Deferred P2 debt: stale Run entry while uninstalled, operator display inventory gap, operational UUIDs in internal-only support bundles, and the characterized full-suite timing case.
+- Safety decision: safe only for the isolated `win-qa-20261105-local` QA environment when launched with the verified local site profile. Not approved for broader beta QA or production shipment.
+
+WINDOWS_PLAYER_CANDIDATE_BLOCKED
