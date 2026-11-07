@@ -1,6 +1,6 @@
 # Windows Player Native Runtime Validation — 2026-11-05
 
-Status: **IN PROGRESS — pairing, local-Docker CMS, default/offline, single-instance, active-video restart/PoP, selected-page PDF restart/rendering/delivery/PoP/snapshot, automatic-window recovery, installed-process restart and revoke/re-pair gates pass; remaining work is authorized sign-out/reboot/autostart completion and final evidence/commit closeout**
+Status: **IN PROGRESS — pairing, local-Docker CMS, default/offline, single-instance, active-video restart/PoP, selected-page PDF restart/rendering/delivery/PoP/snapshot, automatic-window recovery, installed-process restart, supported deletion and fresh re-pair gates pass; remaining work includes persistent local-profile elevation before sign-out/reboot/autostart, two-session convergence, listed edge fixtures and final closeout**
 
 This record covers the isolated Windows QA deployment only. It is not production approval.
 
@@ -168,8 +168,8 @@ The then-installed executable (SHA-256 `5e4ff1aacb0821340f88741f4eee64d389779237
 | Case | Observed behavior | Result |
 | --- | --- | --- |
 | Current-user autostart registration | exactly one `com.darshan.player` Current User Run entry targets the current installed executable; the registration was re-read after the final install and the executable SHA-256 is `28f9dcfeb3a37ba1ebe49971a8b6ffaa88c840c9dbafa7a33790cb7128e008de` | PASS |
-| Local-Docker autostart selector | plain installed/Run launch originally fell back to ProgramData's unavailable remote-QA profile because the local-Docker runtime root and config had only been process-scoped. Two DARSHAN-specific Current User environment values now persist the existing isolated runtime root and canonical `player-runtime/config.json`; both resolved targets exist. The config selector was re-read and corrected after the fresh re-pair so it names the exact config that returned ONLINE. No password, automatic-login, security or unrelated environment value was stored/changed. Actual inheritance remains to be proved by the approved sign-out/reboot journey. | PREPARED / RUNTIME VERIFICATION OPEN |
-| Sign-in/reboot autostart | one sign-out and one reboot are explicitly approved for the end of this run. Registration and local-Docker selectors are prepared; execution is intentionally deferred until the authenticated CMS-dependent final journey completes. | APPROVED / NOT YET RUN |
+| Local-Docker autostart selector | final delete/re-pair proved that a plain installed/Run launch still falls back to the administrator-owned ProgramData remote-QA site profile. `DARSHAN_PLAYER_CONFIG_FILE` expects a nested site-profile document and cannot point at the mutable top-level runtime `config.json`. The current successful local-Docker player uses a process-scoped nested site profile plus the isolated runtime root. No password, automatic login, security setting or unrelated environment value was changed. | BLOCKED ON ADMIN PROFILE UPDATE |
+| Sign-in/reboot autostart | one sign-out and one reboot remain explicitly approved for the end of this run, but running them now would exercise the known remote ProgramData fallback. First update the persistent site profile under Administrator control or install an equivalent valid selector, then perform the approved sign-out/reboot journey. | APPROVED / BLOCKED ON PROFILE PERSISTENCE |
 | Uninstall registration | exactly one Current User `DARSHAN-Player 1.0.0` registration points to the installed uninstaller with `/currentuser`; the entry declares no Control Panel modify/repair action | PASS (PREFLIGHT) |
 | Installed uninstaller | SHA-256 `b43dc90e9896529de5fd298468a62152e3c26a17ef72eaa22ec36d2536daff28`; unsigned | DEGRADED BUT ACCEPTABLE (QA ONLY) |
 | Pre-uninstall retention baseline | installed program: 79 files / 402,870,298 bytes / no reparse points; per-user runtime: 48 files / 1,765,197 bytes / no reparse points, including generic config, device-state and pending-pairing credential files without reading or hashing their contents; ProgramData: only `config.json` (706 bytes, expected SHA-256 `61bdbbd…e6a8`) and `transport-ca.crt` (1,513 bytes, expected SHA-256 `e98416ad…bc48`) | PASS (BASELINE) |
@@ -177,7 +177,7 @@ The then-installed executable (SHA-256 `5e4ff1aacb0821340f88741f4eee64d389779237
 | Uninstall autostart cleanup | the `com.darshan.player` Current User Run value remained while the executable was absent. Windows therefore retained a stale login target until reinstall. No data or pairing loss occurred. | P2 DEFERRED |
 | Exact-package reinstall | the installer was rehashed to `d5195406…630a` / 105,359,989 bytes immediately before reinstall, ran silently with exit 0, restored the exact installed executable hash, recreated one uninstall registration and left one Run entry. Relaunch with the isolated selector reused pairing without OTP, returned one visible `ONLINE` / `DEFAULT MEDIA` kiosk, and the backend retained one fresh dedicated ACTIVE screen with zero active slots. | PASS |
 
-No uninstall, repair/reinstall, sign-out or reboot action was taken in this historical preflight. The exact final package was later exercised as both a same-package silent repair and a complete silent uninstall/reinstall. Both returned the exact executable bytes and reused pairing without OTP; one ONLINE kiosk and exactly one backend screen with fresh heartbeat returned. The uninstaller left a stale Run value only while the executable was absent, classified P2 and automatically repaired by reinstall. Sign-out/reboot remains open.
+No uninstall, repair/reinstall, sign-out or reboot action was taken in this historical preflight. The exact final package was later exercised as both a same-package silent repair and a complete silent uninstall/reinstall. Both returned the exact executable bytes and reused pairing without OTP; one ONLINE kiosk and exactly one backend screen with fresh heartbeat returned. The uninstaller left a stale Run value only while the executable was absent, classified P2 and automatically repaired by reinstall. Sign-out/reboot remains blocked on the persistent local site-profile update recorded above.
 
 `doctor` and the collected `displays.json` reported an empty display inventory even though the running packaged UI and machine baseline identify one 1920×1080 display. Source inspection shows the operator-only process reads `DisplayManager` before starting it. This is a non-blocking diagnostics gap, classified P2 and deferred under the goal's P0/P1-only remediation rule. The pre-pairing doctor also reported WebSocket unreachable; HTTPS bootstrap/API readiness remained healthy, and authenticated realtime behavior still requires pairing.
 
@@ -217,7 +217,7 @@ production TLS remain non-blocking follow-ups rather than gates for this run.
 
 1. Native Edge authentication succeeded and the real dashboard/Screens/Pair Device surfaces loaded, but the CMS production inspection lock then redirected the tab to login before submission. The confirmed P1 false-positive fix passes locally and deployment is authorized, but SSH port 22 is refused and no alternate port/key is available. A reachable SSH endpoint and approved authentication method are required before CMS-only deployment and real-browser reverification; the existing lock will not be bypassed.
 2. Expired generation-55 rejection and current generation-56 approval through the real CMS remain pending. Generation change, different code, stable hostname and stable redacted Device ID are verified.
-3. This historical checkpoint preceded the successful local-Docker pairing, telemetry, media, scheduling, delivery, proof-of-play, screenshot, offline recovery, emergency, paired `clear-cache`/redownload and final same-package repair journeys documented below. Deletion/re-pairing, autostart sign-in/reboot and uninstall/reinstall remain incomplete.
+3. This historical checkpoint preceded the successful local-Docker pairing, telemetry, media, scheduling, delivery, proof-of-play, screenshot, offline recovery, emergency, paired `clear-cache`/redownload and final same-package repair journeys documented below. Supported deletion/re-pairing and uninstall/reinstall were completed later; autostart sign-in/reboot remains blocked on persistent local site-profile setup.
 4. No CMS mutation was submitted and the dashboard remained at zero screens before the lock activated.
 
 The CMS false-lock remediation and its deployment-package provenance are committed separately. This verified player hardening packet is preserved in this scoped commit; integrated QA pairing and post-pairing validation remain pending until the authorized CMS deployment transport is reachable.
@@ -770,6 +770,27 @@ player returned `ONLINE` / `No content assigned` at 09:28:09 without retaining
 the revoked certificate. The old revoked record remains visible only because
 its schedule audit reference makes deletion intentionally unavailable.
 
+With explicit action-time confirmation, the supported CMS then deleted only
+the unreferenced fresh record ending `0042`. The CMS action returned in 147 ms;
+the player was observed on a fresh pairing screen 514 ms later, about 0.66
+seconds after the click sequence and well inside the five-second contract. The
+deleted record disappeared from the Screens list, pairing-code history later
+returned to zero active, and the old identity did not resume authenticated
+heartbeat or proof-of-play activity.
+
+The installed player initially fell back to the stale ProgramData remote site
+profile on an ordinary restart. The run did not bypass UAC or alter security.
+Instead, it used a validated nested local-Docker site profile and isolated
+runtime root inside the approved workspace, moved only stale pairing metadata
+and revoked certificate files to recoverable local backup folders, and issued a
+new local request. CMS approval created fresh screen suffix `1421`; player logs
+showed `PAIRING_CONFIRMED`, CSR/key generation, certificate storage and
+`PAIRED_RUNTIME` at 10:20:50. The visible packaged player then showed `ONLINE`
+and `No content assigned`. CMS showed the fresh record Online/Idle/Auth OK/
+Heartbeat OK, the protected `4bcc` audit record in Recovery Required, zero
+active pairing codes, and after full refresh correct fleet totals `All 2 /
+Online 1 / Needs recovery 1`.
+
 ### Targeted emergency and recovery
 
 | Case | Evidence | Result |
@@ -839,15 +860,15 @@ after first-time pairing. The full Screens operator suite passes 22/22 against
 the existing Chrome installation, the CMS production build and bundle-budget
 gate pass, and lint reports zero errors (three pre-existing warnings). The
 rebuilt CMS files were deployed to the bind-mounted
-`win-qa-20261105-local-cms` container and that container restarted. A final
-visible counter refresh remains to be recorded because the always-on-top
-player prevented the browser-control safety layer from confidently binding the
-Edge URL; no player or CMS record was mutated during that interrupted check.
+`win-qa-20261105-local-cms` container and that container restarted. The final
+delete/re-pair completed the visible recheck: after a full page refresh the
+filters reported `All 2 / Online 1 / Needs recovery 1`, exactly matching fresh
+online screen suffix `1421` and protected revoked audit screen `4bcc`.
 
 ### Remaining approval and coverage gates
 
 1. The final image-layer/recovery-reconciliation package is installed and verified: unsigned SHA-256 `af0a1fd625a6c3e7a7454cc6765017f986e4e7bbbd6bbcc3b8dbc68826ef7845`, 105,360,901 bytes. The exact page-3 journey passed visible playback, delivery, one-slot telemetry, non-black CMS snapshot, default handoff, Completed PoP and a paired installed-process restart. No further installer approval is pending unless source changes create a different package hash or size.
 2. Direct user login to the local CMS completed. The dedicated installed-video request completed authenticated create, approve and publish to only the QA screen; delivery, Now Playing and screenshot evidence pass. The remaining tab-by-tab and two-session convergence checks stay open.
-3. Missing/corrupt image/video runtime fallback, physical audible-output confirmation, missing emergency media and group/site default priority remain open. The final automated regression gates are recorded above. Revocation and fresh re-pair pass. The old revoked record remains correctly protected until the retained schedule's 18:00 +05:30 parent window ends; permitted deletion of the new unreferenced online QA record is prepared in the CMS and awaits the required action-time confirmation. Large-image, corrupt/encrypted-PDF ingest, one-page/selected-page PDF, mute/loop-off and loop-on semantics now have evidence above.
-4. Same-package repair and complete uninstall/reinstall now pass on the exact final installer with pairing persistence and one-screen identity preserved. The stale Run entry during the uninstalled interval is deferred P2 cleanup debt. Sign-out/reboot remains authorized but unexecuted; true upgrade remains blocked unless an older approved package is supplied.
+3. Missing/corrupt image/video runtime fallback, physical audible-output confirmation, missing emergency media and group/site default priority remain open. The final automated regression gates are recorded above. Supported deletion, the sub-five-second fresh-pairing transition and subsequent local re-pair now pass. The old revoked record remains correctly protected until its retained schedule parent can be removed safely. Large-image, corrupt/encrypted-PDF ingest, one-page/selected-page PDF, mute/loop-off and loop-on semantics have evidence above.
+4. Same-package repair and complete uninstall/reinstall pass on the exact final installer. The stale Run entry during the uninstalled interval is deferred P2 cleanup debt. Sign-out/reboot remains authorized but must wait for an Administrator update to the persistent ProgramData local site profile (or an equivalent valid nested selector); true upgrade remains blocked unless an older approved package is supplied.
 5. Remote Ubuntu deployment and production TLS remain **NOT VERIFIED** non-blocking follow-ups.
